@@ -18,8 +18,9 @@ class OpenRouterModels:
                 "api_key": ("STRING", {
                     "multiline": False,
                     "default": "",
-                    "tooltip": "Your OpenRouter API key from openrouter.ai (required for API access)",
-                    "password": True
+                    "tooltip": "⚠️ Your OpenRouter API key from openrouter.ai (Note: key will be visible - take care when sharing workflows)",
+                    "password": True,
+                    "sensitive": True
                 }),
                 "filter_text": ("STRING", {
                     "multiline": False,
