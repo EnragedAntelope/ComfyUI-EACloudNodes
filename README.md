@@ -67,13 +67,15 @@ Query and filter available models from OpenRouter's API.
 Use ComfyManager or to manually install:
 
 1. Clone this repository into your ComfyUI custom_nodes folder:
-bash
+  ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
-
+  ```
 2. Install required packages:
+  ``` bash
 cd ComfyUI-EACloudNodes
 pip install -r requirements.txt
+  ```
 
 3. Restart ComfyUI
 
