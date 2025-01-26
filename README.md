@@ -61,7 +61,8 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 
 #### Features:
 - High-speed inference with Groq's optimized hardware
-- Model selection dropdown with manual entry support
+- Dropdown selection of current Groq models
+- Manual model input option for future or custom models
 - Support for vision-capable models (models with 'vision' in their name)
 - Real-time token usage tracking
 
@@ -69,18 +70,18 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 1. Get your API key from [console.groq.com/keys](https://console.groq.com/keys)
 2. Add the Groq node to your workflow
 3. Enter your API key
-4. Select or enter a model name
+4. Select a model from the dropdown or choose "Manual Input" to specify a custom model
 5. Configure your prompts and parameters
 6. Connect outputs to view responses and status
+
+#### Parameters:
+- `model`: Select from available Groq models or choose "Manual Input"
+- `manual_model`: Enter custom model name (only used when "Manual Input" is selected)
+- [Other common parameters as listed in Common Features section]
 
 #### Outputs:
 - `response`: The model's generated text or JSON response
 - `status`: Detailed information about the request, including model used and token counts
-
-#### Notes:
-- Models are cached during your ComfyUI session for better performance
-- The model list updates only when changing API keys or starting a new session
-- Token usage is displayed in the status output (prompt + completion = total)
 
 ## Installation
 
