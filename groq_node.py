@@ -18,16 +18,21 @@ class GroqNode:
     
     @classmethod
     def INPUT_TYPES(cls):
+        # Initialize default models if none cached
+        if cls._cached_models is None:
+            cls._cached_models = ["llama-3.3-70b-versatile"]
+
         return {
             "required": {
                 "api_key": ("STRING", {
                     "multiline": False,
                     "default": "",
-                    "tooltip": "Your Groq API key from console.groq.com/keys",
-                    "password": True
+                    "tooltip": "Your API key",
+                    "password": True,
+                    "sensitive": True
                 }),
-                "model": (["llama-3.3-70b-versatile"], {  # Default list with one item
-                    "default": "llama-3.3-70b-versatile",
+                "model": (cls._cached_models, {  # Use cached models list
+                    "default": cls._cached_models[0],
                     "tooltip": "Model identifier from Groq (models will be fetched when API key is provided)"
                 }),
                 "system_prompt": ("STRING", {
@@ -57,7 +62,7 @@ Example additional parameters:
                     "lines": 8
                 }),
                 "temperature": ("FLOAT", {
-                    "default": 1.0,
+                    "default": 0.7,
                     "min": 0.0,
                     "max": 2.0,
                     "step": 0.01,
@@ -65,7 +70,7 @@ Example additional parameters:
                     "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
                 }),
                 "top_p": ("FLOAT", {
-                    "default": 0.9,
+                    "default": 0.7,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.01,
@@ -73,7 +78,7 @@ Example additional parameters:
                     "tooltip": "Nucleus sampling threshold"
                 }),
                 "frequency_penalty": ("FLOAT", {
-                    "default": 0.2,
+                    "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
@@ -127,13 +132,10 @@ Example additional parameters:
     RETURN_NAMES = ("response", "status",)
     FUNCTION = "chat_completion"
     CATEGORY = "Groq"
+    OUTPUT_NODE = True  # Add this for green coloring
 
     def fetch_models(self, api_key: str) -> tuple[list, str]:
-        """Fetch available models from Groq API - only if API key changes or not cached"""
-        # Skip fetch if using same API key and models are already cached
-        if self._cached_models and api_key == self._cached_api_key:
-            return self._cached_models, "Success (cached)"
-            
+        """Fetch available models from Groq API"""
         try:
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -148,17 +150,14 @@ Example additional parameters:
             if response.status_code == 200:
                 models_data = response.json().get("data", [])
                 model_list = [model["id"] for model in models_data if model.get("active", False)]
-                # Update the class's model list for the dropdown
-                self.INPUT_TYPES()["required"]["model"][0] = model_list
-                # Cache both the models and the API key
-                self._cached_models = model_list
-                self._cached_api_key = api_key
+                if not model_list:  # Ensure we always have at least one model
+                    model_list = ["llama-3.3-70b-versatile"]
                 return model_list, "Success"
             else:
-                return [], f"Error fetching models: {response.status_code}"
+                return ["llama-3.3-70b-versatile"], f"Error: {response.status_code}"
                 
         except Exception as e:
-            return [], f"Error fetching models: {str(e)}"
+            return ["llama-3.3-70b-versatile"], f"Error: {str(e)}"
 
     def chat_completion(
         self, api_key: str, model: str, system_prompt: str, user_prompt: str,
@@ -171,6 +170,10 @@ Example additional parameters:
         Handles chat completion requests to Groq API
         """
         try:
+            # Validate user prompt
+            if not user_prompt.strip():
+                return "", "Error: User prompt is required"
+
             # Handle seed based on mode
             if seed_mode == "randomize":
                 import random
@@ -184,11 +187,18 @@ Example additional parameters:
             if not api_key.strip():
                 return "", "Error: API key is required"
 
-            # Fetch and cache models if needed (will now use cached version if possible)
+            # Update cached models and API key
             if not self._cached_models or api_key != self._cached_api_key:
-                self._cached_models, models_status = self.fetch_models(api_key)
-                if not self._cached_models:
-                    return "", models_status
+                try:
+                    model_list, status = self.fetch_models(api_key)
+                    if status.startswith("Error"):
+                        return "", f"Model List Error: {status}"
+                    if not model_list:
+                        return "", "Error: No models available"
+                    self.__class__._cached_models = model_list
+                    self.__class__._cached_api_key = api_key
+                except Exception as e:
+                    return "", f"Model Cache Error: {str(e)}"
 
             # Initialize messages list
             messages = []
