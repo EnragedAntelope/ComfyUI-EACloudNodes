@@ -28,8 +28,9 @@ class OpenrouterNode:
                 "api_key": ("STRING", {
                     "multiline": False,
                     "default": "",
-                    "tooltip": "Your OpenRouter API key from openrouter.ai",
-                    "password": True
+                    "tooltip": "⚠️ Your OpenRouter API key from openrouter.ai (Note: key will be visible - take care when sharing workflows)",
+                    "password": True,
+                    "sensitive": True
                 }),
                 "system_prompt": ("STRING", {
     "multiline": True,
