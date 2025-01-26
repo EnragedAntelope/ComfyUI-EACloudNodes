@@ -51,22 +51,17 @@ class GroqNode:
                     "default": "",
                     "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)",
                 }),
-                "user_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": """Overwrite this with your user prompt.
-
-Get your Groq API key at: https://console.groq.com/keys
-Model info at: https://console.groq.com/docs/models
-
-Additional parameters can be set via the additional_params field.""",
-                    "tooltip": "Main prompt/question for the model",
-                    "lines": 8
-                }),
                 "system_prompt": ("STRING", {
                     "multiline": True,
-                    "default": """You are a helpful AI assistant. Provide clear, accurate, and concise responses. If you're unsure about something, say so. Avoid harmful or unethical content.""",
+                    "default": "You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
                     "tooltip": "Optional system prompt to set context/behavior",
                     "lines": 4
+                }),
+                "user_prompt": ("STRING", {
+                    "multiline": True,
+                    "default": "",
+                    "tooltip": "Main prompt/question for the model",
+                    "lines": 8
                 }),
                 "send_system": (["yes", "no"], {
                     "default": "yes",
@@ -163,15 +158,14 @@ Additional parameters can be set via the additional_params field.""",
         """
         Handles chat completion requests to Groq API
         """
-        help_text = """ComfyUI-EACloudNodes - Groq Node
+        help_text = """ComfyUI-EACloudNodes - Groq Chat
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from console.groq.com/keys
 - Model: Choose from dropdown or use Manual Input
-- Manual Model: Custom model identifier
+- System Prompt: Set behavior/context
 - User Prompt: Main input for the model
-- System Prompt: Set behavior
 - Send System: Toggle system prompt (off for vision)
 - Temperature: 0.0 (focused) to 2.0 (creative)
 - Top-p: Nucleus sampling threshold
