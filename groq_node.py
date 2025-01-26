@@ -28,6 +28,7 @@ class GroqNode:
         "llama-3.2-3b-preview",
         "llama-3.2-11b-vision-preview",
         "llama-3.2-90b-vision-preview",
+        "Manual Input"  # Add this option at the end
     ]
     
     @classmethod
@@ -41,10 +42,14 @@ class GroqNode:
                     "password": True,
                     "sensitive": True
                 }),
-                "model": ("STRING", {
+                "model": (cls.DEFAULT_MODELS, {
                     "default": "llama-3.3-70b-versatile",
-                    "options": cls.DEFAULT_MODELS,
-                    "tooltip": "Model identifier from Groq. Vision features available in models with 'vision' in their name. Default options shown but custom values allowed."
+                    "tooltip": "Select a Groq model or choose 'Manual Input' to specify a custom model"
+                }),
+                "manual_model": ("STRING", {
+                    "multiline": False,
+                    "default": "",
+                    "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)",
                 }),
                 "system_prompt": ("STRING", {
                     "multiline": True,
@@ -153,8 +158,8 @@ or
     OUTPUT_NODE = True  # Add this for green coloring
 
     def chat_completion(
-        self, api_key: str, model: str, system_prompt: str, user_prompt: str,
-        temperature: float, top_p: float, frequency_penalty: float,
+        self, api_key: str, model: str, manual_model: str, system_prompt: str, 
+        user_prompt: str, temperature: float, top_p: float, frequency_penalty: float,
         presence_penalty: float, response_format: str, seed: int,
         seed_mode: str, max_completion_tokens: int,
         image_input=None, additional_params=None
@@ -163,6 +168,13 @@ or
         Handles chat completion requests to Groq API
         """
         try:
+            # Use manual_model if "Manual Input" is selected
+            actual_model = manual_model if model == "Manual Input" else model
+
+            # Validate model
+            if model == "Manual Input" and not manual_model.strip():
+                return "", "Error: Manual model input is required when 'Manual Input' is selected"
+
             # Validate user prompt
             if not user_prompt.strip():
                 return "", "Error: User prompt is required"
@@ -232,7 +244,7 @@ or
 
             # Prepare request body
             body = {
-                "model": model,
+                "model": actual_model,
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
