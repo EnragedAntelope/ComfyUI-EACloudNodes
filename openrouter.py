@@ -102,6 +102,23 @@ https://openrouter.ai/models""",
                     "default": "text",
                     "tooltip": "Format of the model's response"
                 }),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 0xffffffffffffffff,
+                    "tooltip": "Seed for reproducible outputs. 0 means random seed."
+                }),
+                "seed_mode": (["fixed", "increment", "decrement", "randomize"], {
+                    "default": "fixed",
+                    "tooltip": "Controls how seed changes between runs"
+                }),
+                "max_tokens": ("INT", {
+                    "default": 1000,
+                    "min": 1,
+                    "max": 32768,
+                    "step": 1,
+                    "tooltip": "Maximum number of tokens to generate (1-32768)"
+                }),
             },
             "optional": {
                 "image_input": ("IMAGE", {
@@ -110,7 +127,7 @@ https://openrouter.ai/models""",
                 "additional_params": ("STRING", {
                     "multiline": True,
                     "default": "",
-                    "tooltip": "Additional OpenRouter parameters in JSON format. Example:\n{\n  \"seed\": 42,\n  \"min_p\": 0.1,\n  \"top_a\": 0.8\n}",
+                    "tooltip": "Additional OpenRouter parameters in JSON format",
                     "lines": 6
                 }),
             }
@@ -121,10 +138,25 @@ https://openrouter.ai/models""",
     FUNCTION = "get_completion"
     CATEGORY = "OpenRouter"
 
-    def get_completion(self, base_url, model, api_key, system_prompt, user_prompt, 
-                      temperature, top_p, top_k, frequency_penalty, presence_penalty, 
-                      repetition_penalty, response_format, image_input=None, additional_params=None):
+    def get_completion(
+        self, base_url: str, model: str, api_key: str, system_prompt: str,
+        user_prompt: str, temperature: float, top_p: float, top_k: int,
+        frequency_penalty: float, presence_penalty: float,
+        repetition_penalty: float, response_format: str, seed: int,
+        seed_mode: str, max_tokens: int,
+        image_input=None, additional_params=None
+    ) -> tuple[str, str]:
         try:
+            # Handle seed based on mode
+            if seed_mode == "randomize":
+                import random
+                seed = random.randint(0, 0xffffffffffffffff)
+            elif seed_mode == "increment":
+                seed = (seed + 1) % 0xffffffffffffffff
+            elif seed_mode == "decrement":
+                seed = (seed - 1) if seed > 0 else 0xffffffffffffffff
+            # "fixed" mode doesn't modify the seed
+
             if not api_key.strip():
                 return ("", "Error: API key is required")
 
@@ -197,6 +229,8 @@ https://openrouter.ai/models""",
                 "frequency_penalty": frequency_penalty,
                 "presence_penalty": presence_penalty,
                 "repetition_penalty": repetition_penalty,
+                "max_tokens": max_tokens,
+                "seed": seed
             }
 
             # Add response format if json_object is selected
