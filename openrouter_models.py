@@ -101,12 +101,32 @@ class OpenRouterModels:
                 filter_terms = filter_text.lower().split()
                 filtered_models = []
                 for model in models_data:
+                    # Get all relevant text fields for text search
                     model_text = (
                         f"{model.get('id', '')} "
                         f"{model.get('name', '')} "
                         f"{model.get('description', '')}"
                     ).lower()
-                    if all(term in model_text for term in filter_terms):
+                    
+                    # Check if model is actually free (pricing = 0)
+                    pricing = model.get('pricing', {})
+                    is_free = (
+                        float(pricing.get('prompt', '0')) == 0 and 
+                        float(pricing.get('completion', '0')) == 0 and
+                        float(pricing.get('image', '0')) == 0 and
+                        float(pricing.get('request', '0')) == 0
+                    )
+
+                    # For each filter term, check if it matches either:
+                    # 1. The term is "free" and the model is actually free (pricing = 0)
+                    # 2. OR the term appears in the model text
+                    matches_all_terms = all(
+                        (term == 'free' and is_free) or  # Check pricing if term is "free"
+                        (term != 'free' and term in model_text)  # Otherwise check text
+                        for term in filter_terms
+                    )
+                    
+                    if matches_all_terms:
                         filtered_models.append(model)
                 models_data = filtered_models
 
