@@ -51,12 +51,6 @@ class GroqNode:
                     "default": "",
                     "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)",
                 }),
-                "system_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": """You are a helpful AI assistant. Provide clear, accurate, and concise responses. If you're unsure about something, say so. Avoid harmful or unethical content.""",
-                    "tooltip": "Optional system prompt to set context/behavior",
-                    "lines": 4
-                }),
                 "user_prompt": ("STRING", {
                     "multiline": True,
                     "default": """Overwrite this with your user prompt.
@@ -64,25 +58,19 @@ class GroqNode:
 Get your Groq API key at: https://console.groq.com/keys
 Model info at: https://console.groq.com/docs/models
 
-Additional parameters can be set via the additional_params field.
-Examples:
-
-{
-    "temperature": 0.5,
-    "top_p": 0.7,
-    "max_tokens": 2000,
-    "presence_penalty": 0.1,
-    "frequency_penalty": 0.1
-}
-
-or
-
-{
-    "stop": ["\n\n", "Human:", "Assistant:"],
-    "response_format": {"type": "json_object"}
-}""",
+Additional parameters can be set via the additional_params field.""",
                     "tooltip": "Main prompt/question for the model",
                     "lines": 8
+                }),
+                "system_prompt": ("STRING", {
+                    "multiline": True,
+                    "default": """You are a helpful AI assistant. Provide clear, accurate, and concise responses. If you're unsure about something, say so. Avoid harmful or unethical content.""",
+                    "tooltip": "Optional system prompt to set context/behavior",
+                    "lines": 4
+                }),
+                "send_system": (["yes", "no"], {
+                    "default": "yes",
+                    "tooltip": "Some models (especially vision models) don't accept system prompts. Toggle 'no' to skip sending the system prompt."
                 }),
                 "temperature": ("FLOAT", {
                     "default": 0.7,
@@ -98,7 +86,14 @@ or
                     "max": 1.0,
                     "step": 0.01,
                     "round": 2,
-                    "tooltip": "Nucleus sampling threshold"
+                    "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
+                }),
+                "max_completion_tokens": ("INT", {
+                    "default": 1000,
+                    "min": 1,
+                    "max": 32768,
+                    "step": 1,
+                    "tooltip": "Maximum number of tokens to generate (1-32768)"
                 }),
                 "frequency_penalty": ("FLOAT", {
                     "default": 0.0,
@@ -130,12 +125,12 @@ or
                     "default": "fixed",
                     "tooltip": "Controls how seed changes between runs"
                 }),
-                "max_completion_tokens": ("INT", {
-                    "default": 1000,
-                    "min": 1,
-                    "max": 32768,
+                "max_retries": ("INT", {
+                    "default": 3,
+                    "min": 0,
+                    "max": 5,
                     "step": 1,
-                    "tooltip": "Maximum number of tokens to generate (1-32768)"
+                    "tooltip": "Maximum number of retry attempts for recoverable errors"
                 }),
             },
             "optional": {
@@ -151,33 +146,64 @@ or
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING",)
-    RETURN_NAMES = ("response", "status",)
+    RETURN_TYPES = ("STRING", "STRING", "STRING",)
+    RETURN_NAMES = ("response", "status", "help",)
     FUNCTION = "chat_completion"
     CATEGORY = "Groq"
-    OUTPUT_NODE = True  # Add this for green coloring
+    OUTPUT_NODE = True
 
     def chat_completion(
-        self, api_key: str, model: str, manual_model: str, system_prompt: str, 
-        user_prompt: str, temperature: float, top_p: float, frequency_penalty: float,
-        presence_penalty: float, response_format: str, seed: int,
-        seed_mode: str, max_completion_tokens: int,
-        image_input=None, additional_params=None
-    ) -> tuple[str, str]:
+        self, api_key: str, model: str, manual_model: str,
+        user_prompt: str, system_prompt: str, send_system: str,
+        temperature: float, top_p: float, max_completion_tokens: int,
+        frequency_penalty: float, presence_penalty: float,
+        response_format: str, seed: int, seed_mode: str,
+        max_retries: int, image_input=None, additional_params=None
+    ) -> tuple[str, str, str]:
         """
         Handles chat completion requests to Groq API
         """
+        help_text = """ComfyUI-EACloudNodes - Groq Node
+Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
+
+Key Settings:
+- API Key: Get from console.groq.com/keys
+- Model: Choose from dropdown or use Manual Input
+- Manual Model: Custom model identifier
+- User Prompt: Main input for the model
+- System Prompt: Set behavior
+- Send System: Toggle system prompt (off for vision)
+- Temperature: 0.0 (focused) to 2.0 (creative)
+- Top-p: Nucleus sampling threshold
+- Max Tokens: Limit response length
+- Frequency Penalty: Control token frequency
+- Presence Penalty: Control token presence
+- Response Format: Text or JSON output
+- Seed: Control randomness (0 = random)
+- Seed Mode: Fixed/increment/decrement/random
+- Max Retries: Auto-retry on errors (0-5)
+
+Optional:
+- Image Input: For vision-capable models
+- Additional Params: Extra model parameters
+
+For vision models:
+1. Select a vision-capable model
+2. Toggle 'send_system' to 'no'
+3. Connect image to 'image_input'
+4. Describe or ask about the image in user_prompt"""
+
         try:
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model if model == "Manual Input" else model
 
             # Validate model
             if model == "Manual Input" and not manual_model.strip():
-                return "", "Error: Manual model input is required when 'Manual Input' is selected"
+                return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
 
             # Validate user prompt
             if not user_prompt.strip():
-                return "", "Error: User prompt is required"
+                return "", "Error: User prompt is required", help_text
 
             # Handle seed based on mode
             if seed_mode == "randomize":
@@ -190,13 +216,17 @@ or
 
             # Validate API key
             if not api_key.strip():
-                return "", "Error: API key is required"
+                return "", "Error: Groq API key is required. Get one at console.groq.com/keys", help_text
+
+            # Vision model validation
+            if image_input is not None and "vision" not in model.lower():
+                return "", f"Error: Model '{model}' does not support vision inputs. Please select a vision-capable model.", help_text
 
             # Initialize messages list
             messages = []
             
-            # Add system prompt if provided
-            if system_prompt.strip():
+            # Add system prompt if provided and enabled
+            if system_prompt.strip() and send_system == "yes":
                 messages.append({
                     "role": "system",
                     "content": system_prompt
@@ -212,7 +242,7 @@ or
                         if image_input.dim() == 4:
                             image_input = image_input.squeeze(0)
                         if image_input.dim() != 3:
-                            return "", "Error: Image tensor must be 3D after squeezing"
+                            return "", "Error: Image tensor must be 3D after squeezing", help_text
                         
                         if image_input.shape[-1] in [1, 3, 4]:
                             image_input = image_input.permute(2, 0, 1)
@@ -221,7 +251,7 @@ or
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
                     else:
-                        return "", "Error: Unsupported image input type"
+                        return "", "Error: Unsupported image input type", help_text
 
                     buffered = io.BytesIO()
                     pil_image.save(buffered, format="PNG")
@@ -234,7 +264,7 @@ or
                         }
                     })
                 except Exception as img_err:
-                    return "", f"Image Processing Error: {str(img_err)}"
+                    return "", f"Image Processing Error: {str(img_err)}", help_text
 
             # Add user message
             messages.append({
@@ -264,46 +294,60 @@ or
                     extra_params = json.loads(additional_params)
                     body.update(extra_params)
                 except json.JSONDecodeError:
-                    return "", "Error: Invalid JSON in additional parameters"
+                    return "", "Error: Invalid JSON in additional parameters. Example format: {\"top_k\": 50}", help_text
 
-            # Make API request
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
+            # Make API request with retry logic
+            retries = 0
+            while True:
+                try:
+                    response = requests.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json=body,
+                        timeout=120
+                    )
 
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=body,
-                timeout=120
-            )
+                    # Define retryable status codes
+                    retryable_codes = {429, 500, 502, 503, 504}
+                    
+                    if response.status_code in retryable_codes and retries < max_retries:
+                        retries += 1
+                        # Add exponential backoff
+                        import time
+                        time.sleep(2 ** retries)  # 2, 4, 8, 16... seconds
+                        continue
 
-            # Handle response
-            if response.status_code == 401:
-                return "", "Error: Invalid API key"
-            elif response.status_code == 429:
-                return "", "Error: Rate limit exceeded"
-            elif response.status_code != 200:
-                return "", f"Error: API returned status {response.status_code}"
+                    # Handle response
+                    if response.status_code == 401:
+                        return "", "Error: Invalid API key", help_text
+                    elif response.status_code == 429:
+                        return "", f"Error: Rate limit exceeded. Tried {retries} times", help_text
+                    elif response.status_code != 200:
+                        return "", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text
 
-            response_json = response.json()
-            
-            # Extract useful information for status
-            model_used = response_json.get("model", "unknown")
-            tokens = response_json.get("usage", {})
-            prompt_tokens = tokens.get("prompt_tokens", 0)
-            completion_tokens = tokens.get("completion_tokens", 0)
-            status_msg = f"Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
+                    response_json = response.json()
+                    
+                    # Extract useful information for status
+                    model_used = response_json.get("model", "unknown")
+                    tokens = response_json.get("usage", {})
+                    prompt_tokens = tokens.get("prompt_tokens", 0)
+                    completion_tokens = tokens.get("completion_tokens", 0)
+                    status_msg = f"Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
 
-            if "choices" in response_json and len(response_json["choices"]) > 0:
-                content = response_json["choices"][0].get("message", {}).get("content", "")
-                return (content, status_msg)
-            else:
-                return "", "Error: No response content from model"
+                    if "choices" in response_json and len(response_json["choices"]) > 0:
+                        content = response_json["choices"][0].get("message", {}).get("content", "")
+                        return (content, status_msg, help_text)
+                    else:
+                        return "", "Error: No response content from model", help_text
+
+                except Exception as e:
+                    return "", f"Unexpected Error: {str(e)}", help_text
 
         except Exception as e:
-            return "", f"Unexpected Error: {str(e)}"
+            return "", f"Unexpected Error: {str(e)}", help_text
 
 # Node registration
 NODE_CLASS_MAPPINGS = {
