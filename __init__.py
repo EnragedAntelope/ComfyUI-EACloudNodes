@@ -12,7 +12,11 @@ from .groq_node import GroqNode, NODE_CLASS_MAPPINGS as GROQ_MAPPINGS, NODE_DISP
 
 # Initialize mappings
 NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "OpenrouterNode": "OpenRouter Chat",
+    "GroqNode": "Groq Chat",
+    "OpenRouterModels": "OpenRouter Models"  # This one stays the same
+}
 
 # Update with all nodes
 NODE_CLASS_MAPPINGS.update(OPENROUTER_MAPPINGS)
