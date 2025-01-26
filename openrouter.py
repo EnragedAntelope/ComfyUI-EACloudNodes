@@ -34,13 +34,13 @@ class OpenrouterNode:
                 }),
                 "user_prompt": ("STRING", {
                     "multiline": True,
-                    "default": "Enter your prompt here...",
+                    "default": "",
                     "tooltip": "Main prompt/question for the model",
                     "lines": 8
                 }),
                 "system_prompt": ("STRING", {
                     "multiline": True,
-                    "default": "You are a helpful AI assistant...",
+                    "default": "You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
                     "tooltip": "Optional system prompt to set context/behavior",
                     "lines": 4
                 }),
@@ -134,11 +134,11 @@ class OpenrouterNode:
 
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("response", "status", "help",)
-    FUNCTION = "get_completion"
+    FUNCTION = "chat_completion"
     CATEGORY = "OpenRouter"
     OUTPUT_NODE = True
 
-    def get_completion(
+    def chat_completion(
         self, api_key: str, model: str, base_url: str,
         user_prompt: str, system_prompt: str,
         temperature: float, top_p: float, top_k: int,
@@ -147,15 +147,15 @@ class OpenrouterNode:
         response_format: str, seed: int, seed_mode: str,
         max_retries: int, image_input=None, additional_params=None
     ) -> tuple[str, str, str]:
-        help_text = """ComfyUI-EACloudNodes - OpenRouter Node
+        help_text = """ComfyUI-EACloudNodes - OpenRouter Chat
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from openrouter.ai/settings/keys
-- Model: Model identifier (e.g., 'anthropic/claude-3-opus', 'google/gemini-pro')
-- User Prompt: Main input for the model
+- Model: Model identifier from OpenRouter
 - System Prompt: Set behavior/context
-- Temperature: 0.0 (focused) to 2.0 (creative)
+- User Prompt: Main input for the model
+- Temperature: Controls randomness (0.0-2.0)
 - Top-p: Nucleus sampling threshold (0.0-1.0)
 - Top-k: Vocabulary limit (1-1000)
 - Max Tokens: Limit response length (1-32768)
@@ -346,5 +346,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "OpenrouterNode": "OpenRouter Node"
+    "OpenrouterNode": "OpenRouter Chat"
 }
