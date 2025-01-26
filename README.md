@@ -8,7 +8,7 @@ A collection of ComfyUI custom nodes for interacting with various cloud services
 The following parameters are available in both OpenRouter and Groq nodes:
 
 #### Common Parameters:
-- `api_key`: Your API key (securely masked in UI)
+- `api_key`: ⚠️ Your API key (Note: key will be visible in workflows)
 - `system_prompt`: Optional system context setting
 - `user_prompt`: Main prompt/question for the model
 - `temperature`: Controls response randomness (0.0-2.0)
@@ -22,30 +22,54 @@ The following parameters are available in both OpenRouter and Groq nodes:
 - `additional_params`: Optional JSON object for extra model parameters
 - `max_tokens`/`max_completion_tokens`: Maximum number of tokens to generate
 
-### OpenRouter Node
+### OpenRouter Nodes
+
+#### OpenRouter Chat Node
 Interact with OpenRouter's API to access various AI models for text and vision tasks.
 
-#### Additional Features:
+##### Additional Features:
 - Access to multiple AI providers through a single API
 - `top_k`: Vocabulary limit (1-1000)
 - `repetition_penalty`: Repetition penalty (1.0-2.0)
 - `base_url`: Configurable OpenRouter API endpoint URL
+
+##### Usage:
+1. Get your API key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+2. Add the OpenRouter node to your workflow
+3. Enter your API key
+4. Configure your model, prompts, and parameters
+5. Connect outputs to view responses and status
+
+#### OpenRouter Models Node
+Query and filter available models from OpenRouter's API.
+
+##### Features:
+- Retrieve complete list of available models
+- Filter models using custom search terms (e.g., 'free', 'gpt', 'claude')
+- Sort models by name, pricing, or context length
+- Detailed model information including pricing and context length
+- Easy-to-read formatted output
+
+##### Parameters:
+- `api_key`: ⚠️ Your OpenRouter API key (Note: key will be visible in workflows)
+- `filter_text`: Text to filter models
+- `sort_by`: Sort models by name, pricing, or context length
+- `sort_order`: Choose ascending or descending sort order
 
 ### Groq Node
 Interact with Groq's API for ultra-fast inference with various LLM models.
 
 #### Features:
 - High-speed inference with Groq's optimized hardware
-- Dynamic model selection dropdown
-- Automatic model caching during session
+- Model selection dropdown with manual entry support
+- Support for vision-capable models (models with 'vision' in their name)
 - Real-time token usage tracking
-- Secure API key handling
 
 #### Usage:
 1. Get your API key from [console.groq.com/keys](https://console.groq.com/keys)
 2. Add the Groq node to your workflow
-3. Enter your API key (the available models will be automatically fetched)
-4. Select a model from the dropdown menu
+3. Enter your API key
+4. Select or enter a model name
 5. Configure your prompts and parameters
 6. Connect outputs to view responses and status
 
@@ -57,22 +81,6 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 - Models are cached during your ComfyUI session for better performance
 - The model list updates only when changing API keys or starting a new session
 - Token usage is displayed in the status output (prompt + completion = total)
-
-### OpenRouter Models Node
-Query and filter available models from OpenRouter's API.
-
-#### Features:
-- Retrieve complete list of available models
-- Filter models using custom search terms
-- Sort models by name, pricing, or context length
-- Detailed model information including pricing and context length
-- Easy-to-read formatted output
-
-#### Parameters:
-- `api_key`: Your OpenRouter API key (securely masked in UI)
-- `filter_text`: Text to filter models (e.g., 'free', 'gpt', 'claude')
-- `sort_by`: Sort models by name, pricing, or context length
-- `sort_order`: Choose ascending or descending sort order
 
 ## Installation
 
