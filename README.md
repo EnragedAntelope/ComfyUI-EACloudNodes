@@ -4,34 +4,59 @@ A collection of ComfyUI custom nodes for interacting with various cloud services
 
 ## Current Nodes
 
-### OpenRouter Node
-Interact with OpenRouter's API to access various AI models for text and vision tasks.
+### Common Features Across LLM Nodes
+The following parameters are available in both OpenRouter and Groq nodes:
 
-#### Features:
-- Text completion with various AI models
-- Vision-language model support for image analysis
-- Configurable model parameters
-- Secure API key handling
-- Support for both text and JSON responses
-- Detailed status feedback and token usage tracking
-
-#### Parameters:
-- `base_url`: OpenRouter API endpoint URL
-- `model`: Model identifier from OpenRouter
-- `api_key`: Your OpenRouter API key (securely masked in UI)
+#### Common Parameters:
+- `api_key`: Your API key (securely masked in UI)
 - `system_prompt`: Optional system context setting
 - `user_prompt`: Main prompt/question for the model
 - `temperature`: Controls response randomness (0.0-2.0)
 - `top_p`: Nucleus sampling threshold (0.0-1.0)
-- `top_k`: Vocabulary limit (1-1000)
 - `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
 - `presence_penalty`: Token presence penalty (-2.0 to 2.0)
-- `repetition_penalty`: Repetition penalty (1.0-2.0)
 - `response_format`: Choose between text or JSON object output
 - `seed`: Control reproducibility (0 for random)
 - `seed_mode`: Choose between fixed, increment, decrement, or randomize
 - `image_input`: Optional image for vision-capable models
-- `additional_params`: Optional JSON object for extra model parameters (e.g., min_p, top_a)
+- `additional_params`: Optional JSON object for extra model parameters
+- `max_tokens`/`max_completion_tokens`: Maximum number of tokens to generate
+
+### OpenRouter Node
+Interact with OpenRouter's API to access various AI models for text and vision tasks.
+
+#### Additional Features:
+- Access to multiple AI providers through a single API
+- `top_k`: Vocabulary limit (1-1000)
+- `repetition_penalty`: Repetition penalty (1.0-2.0)
+- `base_url`: Configurable OpenRouter API endpoint URL
+
+### Groq Node
+Interact with Groq's API for ultra-fast inference with various LLM models.
+
+#### Features:
+- High-speed inference with Groq's optimized hardware
+- Dynamic model selection dropdown
+- Automatic model caching during session
+- Real-time token usage tracking
+- Secure API key handling
+
+#### Usage:
+1. Get your API key from [console.groq.com/keys](https://console.groq.com/keys)
+2. Add the Groq node to your workflow
+3. Enter your API key (the available models will be automatically fetched)
+4. Select a model from the dropdown menu
+5. Configure your prompts and parameters
+6. Connect outputs to view responses and status
+
+#### Outputs:
+- `response`: The model's generated text or JSON response
+- `status`: Detailed information about the request, including model used and token counts
+
+#### Notes:
+- Models are cached during your ComfyUI session for better performance
+- The model list updates only when changing API keys or starting a new session
+- Token usage is displayed in the status output (prompt + completion = total)
 
 ### OpenRouter Models Node
 Query and filter available models from OpenRouter's API.
@@ -48,21 +73,6 @@ Query and filter available models from OpenRouter's API.
 - `filter_text`: Text to filter models (e.g., 'free', 'gpt', 'claude')
 - `sort_by`: Sort models by name, pricing, or context length
 - `sort_order`: Choose ascending or descending sort order
-
-#### Usage:
-1. Add the OpenRouter Models node to your workflow
-2. Set your OpenRouter API key
-3. (Optional) Set filter text to find specific models
-4. Choose sorting preferences
-5. Connect output to a Text node to view results
-6. Copy desired model ID for use in OpenRouter node
-
-#### Tips:
-- Use 'free' filter to find free models
-- Combine terms like 'free llama' for specific searches
-- Sort by pricing to find cost-effective options
-- Check context length for your use case needs
-- Leave filter empty to see all available models
 
 ## Installation
 
@@ -81,17 +91,17 @@ pip install -r requirements.txt
 
 3. Restart ComfyUI
 
-## Usage
+## Usage Tips
 
 ### Basic Text Generation
-1. Add the OpenRouter node to your workflow
-2. Set your OpenRouter API key
-3. Choose a text model (e.g., `google/gemma-2-9b-it:free`)
+1. Add an LLM node (OpenRouter or Groq) to your workflow
+2. Set your API key
+3. Choose a model
 4. Enter your prompt in the `user_prompt` field
 5. Connect the node's output to a Text node to display results
 
 ### Vision Analysis
-1. Add the OpenRouter node to your workflow
+1. Add an LLM node to your workflow
 2. Choose a vision-capable model
 3. Connect an image output to the `image_input`
 4. Add your prompt about the image
@@ -103,11 +113,7 @@ pip install -r requirements.txt
 - Select `json_object` format for structured outputs
 - Monitor token usage via the status output
 - Chain multiple nodes for complex workflows
-- Use seed controls for reproducible outputs:
-  - Fixed: Maintains the same seed value
-  - Increment: Increases seed by 1 after each run
-  - Decrement: Decreases seed by 1 after each run
-  - Randomize: Generates new random seed each run
+- Use seed controls for reproducible outputs
 - Use `additional_params` to set model-specific parameters in JSON format:
   ```json
   {
@@ -116,13 +122,12 @@ pip install -r requirements.txt
   }
   ```
 
-### Tips
+### Parameter Optimization Tips
 - Lower temperature (0.1-0.3) for more focused responses
 - Higher temperature (0.7-1.0) for more creative outputs
 - Use presence_penalty to reduce repetition
 - Monitor token usage to optimize costs
 - Save API key in the node for reuse in workflows
-
 
 ## Contributing
 
