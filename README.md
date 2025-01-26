@@ -9,8 +9,9 @@ The following parameters are available in both OpenRouter and Groq nodes:
 
 #### Common Parameters:
 - `api_key`: ⚠️ Your API key (Note: key will be visible in workflows)
-- `system_prompt`: Optional system context setting
+- `model`: Model selection (dropdown or identifier)
 - `user_prompt`: Main prompt/question for the model
+- `system_prompt`: Optional system context setting
 - `temperature`: Controls response randomness (0.0-2.0)
 - `top_p`: Nucleus sampling threshold (0.0-1.0)
 - `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
@@ -18,9 +19,14 @@ The following parameters are available in both OpenRouter and Groq nodes:
 - `response_format`: Choose between text or JSON object output
 - `seed`: Control reproducibility (0 for random)
 - `seed_mode`: Choose between fixed, increment, decrement, or randomize
+- `max_retries`: Maximum retry attempts (0-5) for recoverable errors
 - `image_input`: Optional image for vision-capable models
 - `additional_params`: Optional JSON object for extra model parameters
-- `max_tokens`/`max_completion_tokens`: Maximum number of tokens to generate
+
+#### Common Outputs:
+- `response`: The model's generated text or JSON response
+- `status`: Detailed information about the request, including model used and token counts
+- `help`: Static help text with usage information and repository URL
 
 ### OpenRouter Nodes
 
@@ -33,12 +39,30 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - `repetition_penalty`: Repetition penalty (1.0-2.0)
 - `base_url`: Configurable OpenRouter API endpoint URL
 
-##### Usage:
-1. Get your API key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
-2. Add the OpenRouter node to your workflow
-3. Enter your API key
-4. Configure your model, prompts, and parameters
-5. Connect outputs to view responses and status
+##### Parameters:
+- `api_key`: ⚠️ Your OpenRouter API key (Get from openrouter.ai/settings/keys)
+- `model`: Model identifier from OpenRouter
+- `base_url`: OpenRouter API endpoint URL
+- `user_prompt`: Main prompt/question for the model
+- `system_prompt`: Optional system context setting
+- `temperature`: Controls response randomness (0.0-2.0)
+- `top_p`: Nucleus sampling threshold (0.0-1.0)
+- `top_k`: Vocabulary limit (1-1000)
+- `max_tokens`: Maximum number of tokens to generate
+- `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
+- `presence_penalty`: Token presence penalty (-2.0 to 2.0)
+- `repetition_penalty`: Repetition penalty (1.0-2.0)
+- `response_format`: Choose between text or JSON object output
+- `seed`: Control reproducibility (0 for random)
+- `seed_mode`: Choose between fixed, increment, decrement, or randomize
+- `max_retries`: Number of retry attempts for recoverable errors (0-5)
+- `image_input`: Optional image for vision-capable models
+- `additional_params`: Optional JSON object for extra model parameters
+
+##### Outputs:
+- `response`: The model's generated text or JSON response
+- `status`: Detailed information about the request, including model used and token counts
+- `help`: Static help text with usage information and repository URL
 
 #### OpenRouter Models Node
 Query and filter available models from OpenRouter's API.
@@ -65,6 +89,8 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 - Manual model input option for future or custom models
 - Support for vision-capable models (models with 'vision' in their name)
 - Real-time token usage tracking
+- Automatic retry mechanism for recoverable errors
+- Toggle for system prompt sending (required for vision models)
 
 #### Usage:
 1. Get your API key from [console.groq.com/keys](https://console.groq.com/keys)
@@ -72,16 +98,38 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 3. Enter your API key
 4. Select a model from the dropdown or choose "Manual Input" to specify a custom model
 5. Configure your prompts and parameters
-6. Connect outputs to view responses and status
+6. Connect outputs to view responses, status, and help information
 
 #### Parameters:
 - `model`: Select from available Groq models or choose "Manual Input"
 - `manual_model`: Enter custom model name (only used when "Manual Input" is selected)
-- [Other common parameters as listed in Common Features section]
+- `user_prompt`: Main prompt/question for the model
+- `system_prompt`: Optional system context setting
+- `send_system`: Toggle system prompt sending (must be off for vision models)
+- `temperature`: Controls response randomness (0.0-2.0)
+- `top_p`: Nucleus sampling threshold (0.0-1.0)
+- `max_completion_tokens`: Maximum number of tokens to generate
+- `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
+- `presence_penalty`: Token presence penalty (-2.0 to 2.0)
+- `response_format`: Choose between text or JSON object output
+- `seed`: Control reproducibility (0 for random)
+- `seed_mode`: Choose between fixed, increment, decrement, or randomize
+- `max_retries`: Number of retry attempts for recoverable errors (0-5)
+- `image_input`: Optional image for vision-capable models
+- `additional_params`: Optional JSON object for extra model parameters
 
 #### Outputs:
 - `response`: The model's generated text or JSON response
 - `status`: Detailed information about the request, including model used and token counts
+- `help`: Static help text with usage information and repository URL
+
+### Vision Analysis
+1. Add an LLM node to your workflow
+2. Choose a vision-capable model
+3. Connect an image output to the `image_input`
+4. For Groq vision models, toggle 'send_system' to 'no'
+5. Add your prompt about the image
+6. Connect outputs to view response, status, and help information
 
 ## Installation
 
@@ -134,9 +182,21 @@ pip install -r requirements.txt
 ### Parameter Optimization Tips
 - Lower temperature (0.1-0.3) for more focused responses
 - Higher temperature (0.7-1.0) for more creative outputs
+- Lower top_p (0.1-0.3) for more predictable word choices
+- Higher top_p (0.7-1.0) for more diverse vocabulary
 - Use presence_penalty to reduce repetition
 - Monitor token usage to optimize costs
 - Save API key in the node for reuse in workflows
+
+## Changelog
+
+### v0.1.0
+- Initial release
+- Support for Groq and OpenRouter APIs
+- Vision model support
+- Automatic retry mechanism
+- Token usage tracking
+- Seed control options
 
 ## Contributing
 
@@ -155,3 +215,12 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+### Error Handling
+Both nodes provide detailed error messages for common issues:
+- Missing or invalid API keys
+- Model compatibility issues
+- Image size and format requirements
+- JSON format validation
+- Token limits and usage
+- API rate limits and retries
