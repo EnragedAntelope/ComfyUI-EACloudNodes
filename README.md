@@ -28,8 +28,10 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - `presence_penalty`: Token presence penalty (-2.0 to 2.0)
 - `repetition_penalty`: Repetition penalty (1.0-2.0)
 - `response_format`: Choose between text or JSON object output
+- `seed`: Control reproducibility (0 for random)
+- `seed_mode`: Choose between fixed, increment, decrement, or randomize
 - `image_input`: Optional image for vision-capable models
-- `additional_params`: Optional JSON object for extra model parameters (e.g., seed, min_p, top_a)
+- `additional_params`: Optional JSON object for extra model parameters (e.g., min_p, top_a)
 
 ### OpenRouter Models Node
 Query and filter available models from OpenRouter's API.
@@ -101,6 +103,11 @@ pip install -r requirements.txt
 - Select `json_object` format for structured outputs
 - Monitor token usage via the status output
 - Chain multiple nodes for complex workflows
+- Use seed controls for reproducible outputs:
+  - Fixed: Maintains the same seed value
+  - Increment: Increases seed by 1 after each run
+  - Decrement: Decreases seed by 1 after each run
+  - Randomize: Generates new random seed each run
 - Use `additional_params` to set model-specific parameters in JSON format:
   ```json
   {
