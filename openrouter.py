@@ -32,14 +32,14 @@ class OpenrouterNode:
                     "password": True
                 }),
                 "system_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": "You are a helpful AI assistant. Provide clear, accurate, and concise responses. If you're unsure about something, say so. Avoid harmful or unethical content.",
-                    "tooltip": "Optional system prompt to set context/behavior",
-                    "lines": 4  # Make the text box taller
-                }),
-                "user_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": """Overwrite this with your user prompt.
+    "multiline": True,
+    "default": "You are a helpful AI assistant. Provide clear, accurate, and concise responses. If you're unsure about something, say so. Avoid harmful or unethical content.",
+    "tooltip": "Optional system prompt to set context/behavior",
+    "lines": 3  # Reduced from 4 since it's shorter
+}),
+"user_prompt": ("STRING", {
+    "multiline": True,
+    "default": """Overwrite this with your user prompt.
 
 Get OpenRouter API key at https://openrouter.ai/settings/keys
 
@@ -48,11 +48,11 @@ https://openrouter.ai/docs/parameters
 
 Available models here:
 https://openrouter.ai/models""",
-                    "tooltip": "Main prompt/question for the model",
-                    "lines": 8  # Make the text box much taller for visibility
-                }),
+    "tooltip": "Main prompt/question for the model",
+    "lines": 10  # Increased from 8 for better visibility
+}),
                 "temperature": ("FLOAT", {
-                    "default": 1.0,
+                    "default": 0.7,
                     "min": 0.0,
                     "max": 2.0,
                     "step": 0.01,
@@ -60,7 +60,7 @@ https://openrouter.ai/models""",
                     "tooltip": "Controls randomness in responses (0.0 = deterministic, 2.0 = very random)"
                 }),
                 "top_p": ("FLOAT", {
-                    "default": 0.9,
+                    "default": 0.7,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.01,
@@ -75,7 +75,7 @@ https://openrouter.ai/models""",
                     "tooltip": "Limits vocabulary to top K tokens"
                 }),
                 "frequency_penalty": ("FLOAT", {
-                    "default": 0.2,
+                    "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
@@ -137,6 +137,7 @@ https://openrouter.ai/models""",
     RETURN_NAMES = ("response", "status",)
     FUNCTION = "get_completion"
     CATEGORY = "OpenRouter"
+    OUTPUT_NODE = True
 
     def get_completion(
         self, base_url: str, model: str, api_key: str, system_prompt: str,
@@ -147,6 +148,10 @@ https://openrouter.ai/models""",
         image_input=None, additional_params=None
     ) -> tuple[str, str]:
         try:
+            # Add user prompt validation
+            if not user_prompt.strip():
+                return ("", "Error: User prompt is required")
+
             # Handle seed based on mode
             if seed_mode == "randomize":
                 import random
@@ -176,7 +181,10 @@ https://openrouter.ai/models""",
                 })
 
             # Prepare user message content
-            user_content = [{"type": "text", "text": user_prompt}]
+            messages.append({
+                "role": "user",
+                "content": user_prompt  # Direct text for non-image messages
+            })
 
             # Handle image input if provided
             if image_input is not None:
@@ -198,26 +206,29 @@ https://openrouter.ai/models""",
                     else:
                         return ("", "Error: Unsupported image input type")
 
+                    # Add size validation
+                    if pil_image.size[0] * pil_image.size[1] > 2048 * 2048:
+                        return ("", "Error: Image too large. Maximum size is 2048x2048")
+                    
                     # Convert image to base64
                     buffered = io.BytesIO()
                     pil_image.save(buffered, format="PNG")
                     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
                     
                     # Add image to user content
-                    user_content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{img_str}"
-                        }
-                    })
+                    user_content = [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
+                    ]
+                    
+                    # Use this message structure instead of adding duplicate
+                    messages = [
+                        *({"role": "system", "content": system_prompt} 
+                          for _ in [1] if system_prompt.strip()),
+                        {"role": "user", "content": user_content}
+                    ]
                 except Exception as img_err:
                     return ("", f"Image Processing Error: {str(img_err)}")
-
-            # Add user message with text and optional image
-            messages.append({
-                "role": "user",
-                "content": user_content
-            })
 
             # Prepare request body with standard parameters
             body = {
@@ -256,14 +267,20 @@ https://openrouter.ai/models""",
                     return ("", "Error: Rate limit exceeded. Please wait before trying again")
                 elif response.status_code == 500:
                     return ("", "Error: OpenRouter service error. Please try again later")
+                elif response.status_code == 400:
+                    return ("", "Error: Bad request - check model name and parameters")
+                elif response.status_code == 413:
+                    return ("", "Error: Payload too large - try reducing prompt or image size")
                 
                 response.raise_for_status()
                 response_json = response.json()
 
                 # Extract useful information for status
                 model_used = response_json.get("model", "unknown")
-                tokens_used = response_json.get("usage", {}).get("total_tokens", 0)
-                status_msg = f"Success: Used model {model_used} | Tokens: {tokens_used}"
+                tokens = response_json.get("usage", {})
+                prompt_tokens = tokens.get("prompt_tokens", 0)
+                completion_tokens = tokens.get("completion_tokens", 0)
+                status_msg = f"Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
 
                 if "choices" in response_json and len(response_json["choices"]) > 0:
                     assistant_message = response_json["choices"][0].get("message", {}).get("content", "")
