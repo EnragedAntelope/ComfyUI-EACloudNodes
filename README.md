@@ -1,6 +1,6 @@
 # ComfyUI-EACloudNodes
 
-A collection of ComfyUI custom nodes for interacting with various cloud services. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
+A collection of ComfyUI custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter.. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
 
 ## Current Nodes
 
