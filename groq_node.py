@@ -30,16 +30,8 @@ class GroqNode:
         "llama-3.2-90b-vision-preview",
     ]
     
-    # Class variable to cache models - shared across all instances
-    _cached_models = None
-    _cached_api_key = None  # Add cache for API key to detect changes
-    
     @classmethod
     def INPUT_TYPES(cls):
-        # Initialize default models if none cached
-        if cls._cached_models is None:
-            cls._cached_models = cls.DEFAULT_MODELS
-
         return {
             "required": {
                 "api_key": ("STRING", {
@@ -160,31 +152,6 @@ or
     CATEGORY = "Groq"
     OUTPUT_NODE = True  # Add this for green coloring
 
-    def fetch_models(self, api_key: str) -> tuple[list, str]:
-        """Fetch available models from Groq API"""
-        try:
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            response = requests.get(
-                "https://api.groq.com/openai/v1/models",
-                headers=headers,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                models_data = response.json().get("data", [])
-                model_list = [model["id"] for model in models_data if model.get("active", False)]
-                if not model_list:  # Ensure we always have at least one model
-                    model_list = ["llama-3.3-70b-versatile"]
-                return model_list, "Success"
-            else:
-                return ["llama-3.3-70b-versatile"], f"Error: {response.status_code}"
-                
-        except Exception as e:
-            return ["llama-3.3-70b-versatile"], f"Error: {str(e)}"
-
     def chat_completion(
         self, api_key: str, model: str, system_prompt: str, user_prompt: str,
         temperature: float, top_p: float, frequency_penalty: float,
@@ -212,19 +179,6 @@ or
             # Validate API key
             if not api_key.strip():
                 return "", "Error: API key is required"
-
-            # Update cached models and API key
-            if not self._cached_models or api_key != self._cached_api_key:
-                try:
-                    model_list, status = self.fetch_models(api_key)
-                    if status.startswith("Error"):
-                        return "", f"Model List Error: {status}"
-                    if not model_list:
-                        return "", "Error: No models available"
-                    self.__class__._cached_models = model_list
-                    self.__class__._cached_api_key = api_key
-                except Exception as e:
-                    return "", f"Model Cache Error: {str(e)}"
 
             # Initialize messages list
             messages = []
