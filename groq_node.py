@@ -12,6 +12,24 @@ class GroqNode:
     Supports text and vision-language models through Groq's API.
     """
     
+    # Default models list from Groq documentation
+    DEFAULT_MODELS = [
+        # Production Models
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "llama-guard-3-8b",
+        "llama3-70b-8192",
+        "llama3-8b-8192",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+        # Preview Models
+        "llama-3.3-70b-specdec",
+        "llama-3.2-1b-preview",
+        "llama-3.2-3b-preview",
+        "llama-3.2-11b-vision-preview",
+        "llama-3.2-90b-vision-preview",
+    ]
+    
     # Class variable to cache models - shared across all instances
     _cached_models = None
     _cached_api_key = None  # Add cache for API key to detect changes
@@ -20,20 +38,21 @@ class GroqNode:
     def INPUT_TYPES(cls):
         # Initialize default models if none cached
         if cls._cached_models is None:
-            cls._cached_models = ["llama-3.3-70b-versatile"]
+            cls._cached_models = cls.DEFAULT_MODELS
 
         return {
             "required": {
                 "api_key": ("STRING", {
                     "multiline": False,
                     "default": "",
-                    "tooltip": "Your API key",
+                    "tooltip": "⚠️ Your Groq API key from console.groq.com/keys (Note: key will be visible - take care when sharing workflows)",
                     "password": True,
                     "sensitive": True
                 }),
-                "model": (cls._cached_models, {  # Use cached models list
-                    "default": cls._cached_models[0],
-                    "tooltip": "Model identifier from Groq (models will be fetched when API key is provided)"
+                "model": ("STRING", {
+                    "default": "llama-3.3-70b-versatile",
+                    "options": cls.DEFAULT_MODELS,
+                    "tooltip": "Model identifier from Groq. Vision features available in models with 'vision' in their name. Default options shown but custom values allowed."
                 }),
                 "system_prompt": ("STRING", {
                     "multiline": True,
@@ -46,17 +65,24 @@ class GroqNode:
                     "default": """Overwrite this with your user prompt.
 
 Get your Groq API key at: https://console.groq.com/keys
-
 Model info at: https://console.groq.com/docs/models
 
 Additional parameters can be set via the additional_params field.
-See full API reference for all options:
-https://console.groq.com/docs/api-reference
+Examples:
 
-Example additional parameters:
 {
-    "stop": ["END"],
-    "stream_options": {"chunk_size": 20}
+    "temperature": 0.5,
+    "top_p": 0.7,
+    "max_tokens": 2000,
+    "presence_penalty": 0.1,
+    "frequency_penalty": 0.1
+}
+
+or
+
+{
+    "stop": ["\n\n", "Human:", "Assistant:"],
+    "response_format": {"type": "json_object"}
 }""",
                     "tooltip": "Main prompt/question for the model",
                     "lines": 8
