@@ -104,7 +104,6 @@ pip install -r requirements.txt
 - Use `additional_params` to set model-specific parameters in JSON format:
   ```json
   {
-    "seed": 42,
     "min_p": 0.1,
     "top_a": 0.8
   }
