@@ -1,6 +1,22 @@
 # ComfyUI-EACloudNodes
 
-A collection of ComfyUI custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter.. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
+A collection of ComfyUI custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
+
+## Installation
+
+Use ComfyManager or to manually install:
+
+1. Clone this repository into your ComfyUI custom_nodes folder:
+  ```bash
+cd ComfyUI/custom_nodes
+git clone https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
+  ```
+2. Install required packages:
+  ```bash
+cd ComfyUI-EACloudNodes
+pip install -r requirements.txt
+  ```
+3. Restart ComfyUI
 
 ## Current Nodes
 
@@ -10,8 +26,8 @@ The following parameters are available in both OpenRouter and Groq nodes:
 #### Common Parameters:
 - `api_key`: ⚠️ Your API key (Note: key will be visible in workflows)
 - `model`: Model selection (dropdown or identifier)
-- `user_prompt`: Main prompt/question for the model
 - `system_prompt`: Optional system context setting
+- `user_prompt`: Main prompt/question for the model
 - `temperature`: Controls response randomness (0.0-2.0)
 - `top_p`: Nucleus sampling threshold (0.0-1.0)
 - `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
@@ -28,7 +44,8 @@ The following parameters are available in both OpenRouter and Groq nodes:
 - `status`: Detailed information about the request, including model used and token counts
 - `help`: Static help text with usage information and repository URL
 
-### OpenRouter Nodes
+### OpenRouter Chat
+Interact with OpenRouter's API to access various AI models for text and vision tasks.
 
 #### OpenRouter Chat Node
 Interact with OpenRouter's API to access various AI models for text and vision tasks.
@@ -80,7 +97,7 @@ Query and filter available models from OpenRouter's API.
 - `sort_by`: Sort models by name, pricing, or context length
 - `sort_order`: Choose ascending or descending sort order
 
-### Groq Node
+### Groq Chat
 Interact with Groq's API for ultra-fast inference with various LLM models.
 
 #### Features:
@@ -131,31 +148,15 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 5. Add your prompt about the image
 6. Connect outputs to view response, status, and help information
 
-## Installation
-
-Use ComfyManager or to manually install:
-
-1. Clone this repository into your ComfyUI custom_nodes folder:
-  ```bash
-cd ComfyUI/custom_nodes
-git clone https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
-  ```
-2. Install required packages:
-  ``` bash
-cd ComfyUI-EACloudNodes
-pip install -r requirements.txt
-  ```
-
-3. Restart ComfyUI
-
-## Usage Tips
+## Usage Guide
 
 ### Basic Text Generation
 1. Add an LLM node (OpenRouter or Groq) to your workflow
 2. Set your API key
 3. Choose a model
-4. Enter your prompt in the `user_prompt` field
-5. Connect the node's output to a Text node to display results
+4. (Optional) Set system prompt for context/behavior
+5. Enter your prompt in the `user_prompt` field
+6. Connect the node's output to a Text node to display results
 
 ### Vision Analysis
 1. Add an LLM node to your workflow
@@ -188,6 +189,15 @@ pip install -r requirements.txt
 - Monitor token usage to optimize costs
 - Save API key in the node for reuse in workflows
 
+### Error Handling
+Both nodes provide detailed error messages for common issues:
+- Missing or invalid API keys
+- Model compatibility issues
+- Image size and format requirements
+- JSON format validation
+- Token limits and usage
+- API rate limits and retries
+
 ## Changelog
 
 ### v0.1.0
@@ -215,12 +225,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
-### Error Handling
-Both nodes provide detailed error messages for common issues:
-- Missing or invalid API keys
-- Model compatibility issues
-- Image size and format requirements
-- JSON format validation
-- Token limits and usage
-- API rate limits and retries
