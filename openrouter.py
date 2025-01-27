@@ -12,6 +12,36 @@ class OpenrouterNode:
     A node for interacting with OpenRouter API.
     Supports text and vision-language models through OpenRouter's API.
     """
+    # Default models list
+    DEFAULT_MODELS = [
+        "google/gemini-2.0-flash-exp:free",
+        "google/gemini-2.0-flash-thinking-exp-1219:free",
+        "google/gemini-2.0-flash-thinking-exp:free",
+        "google/gemini-exp-1114:free",
+        "google/gemini-exp-1121:free",
+        "google/gemini-exp-1206:free",
+        "google/gemma-2-9b-it:free",
+        "google/learnlm-1.5-pro-experimental:free",
+        "gryphe/mythomax-l2-13b:free",
+        "huggingfaceh4/zephyr-7b-beta:free",
+        "meta-llama/llama-3-8b-instruct:free",
+        "meta-llama/llama-3.1-405b-instruct:free",
+        "meta-llama/llama-3.1-70b-instruct:free",
+        "meta-llama/llama-3.1-8b-instruct:free",
+        "meta-llama/llama-3.2-11b-vision-instruct:free",
+        "meta-llama/llama-3.2-1b-instruct:free",
+        "meta-llama/llama-3.2-3b-instruct:free",
+        "meta-llama/llama-3.2-90b-vision-instruct:free",
+        "microsoft/phi-3-medium-128k-instruct:free",
+        "microsoft/phi-3-mini-128k-instruct:free",
+        "mistralai/mistral-7b-instruct:free",
+        "openchat/openchat-7b:free",
+        "qwen/qwen-2-7b-instruct:free",
+        "sophosympatheia/rogue-rose-103b-v0.2:free",
+        "undi95/toppy-m-7b:free",
+        "Manual Input"  # Add manual input option
+    ]
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -19,14 +49,18 @@ class OpenrouterNode:
                 "api_key": ("STRING", {
                     "multiline": False,
                     "default": "",
-                    "tooltip": "⚠️ Your OpenRouter API key from openrouter.ai/settings/keys (Note: key will be visible - take care when sharing workflows)",
+                    "tooltip": "⚠️ Your OpenRouter API key from https://openrouter.ai/keys (Note: key will be visible - take care when sharing workflows)",
                     "password": True,
                     "sensitive": True
                 }),
-                "model": ("STRING", {
-                    "multiline": False,
+                "model": (cls.DEFAULT_MODELS, {
                     "default": "google/gemma-2-9b-it:free",
-                    "tooltip": "Model identifier from OpenRouter (e.g., anthropic/claude-3-opus, google/gemini-pro). See openrouter.ai/models"
+                    "tooltip": "Select a model from the list or choose 'Manual Input' to specify a custom model"
+                }),
+                "manual_model": ("STRING", {
+                    "multiline": False,
+                    "default": "",
+                    "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)",
                 }),
                 "base_url": ("STRING", {
                     "multiline": False,
@@ -140,7 +174,8 @@ class OpenrouterNode:
     OUTPUT_NODE = True
 
     def chat_completion(
-        self, api_key: str, model: str, base_url: str,
+        self, api_key: str, model: str, manual_model: str,
+        base_url: str,
         user_prompt: str, system_prompt: str,
         temperature: float, top_p: float, top_k: int,
         max_tokens: int, frequency_penalty: float,
@@ -152,30 +187,39 @@ class OpenrouterNode:
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
-- API Key: Get from openrouter.ai/settings/keys
-- Model: Model identifier from OpenRouter
+- API Key: Get from https://openrouter.ai/keys
+- Model: Choose from dropdown or use Manual Input
+- Manual Model: Custom model ID (when Manual Input selected)
 - System Prompt: Set behavior/context
 - User Prompt: Main input for the model
-- Temperature: Controls randomness (0.0-2.0)
-- Top-p: Nucleus sampling threshold (0.0-1.0)
-- Top-k: Vocabulary limit (1-1000)
-- Max Tokens: Limit response length (1-32768)
-- Frequency/Presence/Repetition Penalties: Control token usage
+- Temperature: 0.0 (focused) to 2.0 (creative)
+- Top-p: Nucleus sampling threshold
+- Top-k: Vocabulary limit
+- Max Tokens: Limit response length
+- Frequency Penalty: Control token frequency
+- Presence Penalty: Control token presence
+- Repetition Penalty: Control repetition
 - Response Format: Text or JSON output
-- Seed Mode: Control reproducibility (fixed/random/increment/decrement)
-- Seed Value: Starting seed for fixed mode or increment/decrement
+- Seed Mode: Fixed/random/increment/decrement
 - Max Retries: Auto-retry on errors (0-5)
 
 Optional:
 - Image Input: For vision-capable models
-- Additional Params: Extra model parameters in JSON format
+- Additional Params: Extra model parameters
 
 For vision models:
-1. Choose a vision-capable model
+1. Select a vision-capable model
 2. Connect image to 'image_input'
 3. Describe or ask about the image in user_prompt"""
 
         try:
+            # Use manual_model if "Manual Input" is selected
+            actual_model = manual_model if model == "Manual Input" else model
+
+            # Validate model
+            if model == "Manual Input" and not manual_model.strip():
+                return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
+
             # Add user prompt validation
             if not user_prompt.strip():
                 return ("", "Error: User prompt is required", help_text)
@@ -191,10 +235,16 @@ For vision models:
                 seed = seed_value
 
             if not api_key.strip():
-                return ("", "Error: OpenRouter API key is required. Get one at openrouter.ai/settings/keys", help_text)
+                return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
 
-            if not model.strip():
+            if not actual_model.strip():
                 return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
+
+            if not base_url.strip():
+                return ("", "Error: OpenRouter API endpoint URL is required", help_text)
+
+            if not base_url.startswith(("http://", "https://")):
+                return ("", "Error: Invalid API endpoint URL format", help_text)
 
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -263,7 +313,7 @@ For vision models:
 
             # Prepare request body with standard parameters
             body = {
-                "model": model,
+                "model": actual_model,
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
