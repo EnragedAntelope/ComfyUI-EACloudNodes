@@ -24,6 +24,7 @@ class GroqNode:
         "mixtral-8x7b-32768",
         "gemma2-9b-it",
         # Preview Models
+        "deepseek-r1-distill-llama-70b",
         "llama-3.3-70b-specdec",
         "llama-3.2-1b-preview",
         "llama-3.2-3b-preview",
@@ -39,7 +40,7 @@ class GroqNode:
                 "api_key": ("STRING", {
                     "multiline": False,
                     "default": "",
-                    "tooltip": "⚠️ Your Groq API key from console.groq.com/keys (Note: key will be visible - take care when sharing workflows)",
+                    "tooltip": "⚠️ Your Groq API key from https://console.groq.com/keys (Note: key will be visible - take care when sharing workflows)",
                     "password": True,
                     "sensitive": True
                 }),
@@ -163,7 +164,7 @@ class GroqNode:
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
-- API Key: Get from console.groq.com/keys
+- API Key: Get from https://console.groq.com/keys
 - Model: Choose from dropdown or use Manual Input
 - System Prompt: Set behavior/context
 - User Prompt: Main input for the model
