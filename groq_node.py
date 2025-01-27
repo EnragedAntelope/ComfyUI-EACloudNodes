@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import torch
 from torchvision.transforms import ToPILImage
+import random
 
 class GroqNode:
     """
@@ -110,15 +111,15 @@ class GroqNode:
                     "default": "text",
                     "tooltip": "Format of the model's response"
                 }),
-                "seed": ("INT", {
+                "seed_mode": (["fixed", "random", "increment", "decrement"], {
+                    "default": "random",
+                    "tooltip": "Control seed behavior: fixed (use seed value), random (new seed each time), increment/decrement (change by 1)"
+                }),
+                "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
                     "max": 0xffffffffffffffff,
-                    "tooltip": "Seed for reproducible outputs. 0 means random seed."
-                }),
-                "seed_mode": (["fixed", "increment", "decrement", "randomize"], {
-                    "default": "fixed",
-                    "tooltip": "Controls how seed changes between runs"
+                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
                 }),
                 "max_retries": ("INT", {
                     "default": 3,
@@ -152,7 +153,7 @@ class GroqNode:
         user_prompt: str, system_prompt: str, send_system: str,
         temperature: float, top_p: float, max_completion_tokens: int,
         frequency_penalty: float, presence_penalty: float,
-        response_format: str, seed: int, seed_mode: str,
+        response_format: str, seed_mode: str, seed_value: int,
         max_retries: int, image_input=None, additional_params=None
     ) -> tuple[str, str, str]:
         """
@@ -173,8 +174,8 @@ Key Settings:
 - Frequency Penalty: Control token frequency
 - Presence Penalty: Control token presence
 - Response Format: Text or JSON output
-- Seed: Control randomness (0 = random)
-- Seed Mode: Fixed/increment/decrement/random
+- Seed Mode: Fixed/random/increment/decrement
+- Seed Value: Seed value for 'fixed' mode
 - Max Retries: Auto-retry on errors (0-5)
 
 Optional:
@@ -200,13 +201,14 @@ For vision models:
                 return "", "Error: User prompt is required", help_text
 
             # Handle seed based on mode
-            if seed_mode == "randomize":
-                import random
+            if seed_mode == "random":
                 seed = random.randint(0, 0xffffffffffffffff)
             elif seed_mode == "increment":
-                seed = (seed + 1) % 0xffffffffffffffff
+                seed = (seed_value + 1) % 0xffffffffffffffff
             elif seed_mode == "decrement":
-                seed = (seed - 1) if seed > 0 else 0xffffffffffffffff
+                seed = (seed_value - 1) if seed_value > 0 else 0xffffffffffffffff
+            else:  # "fixed"
+                seed = seed_value
 
             # Validate API key
             if not api_key.strip():
