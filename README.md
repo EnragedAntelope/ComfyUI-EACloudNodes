@@ -33,8 +33,7 @@ The following parameters are available in both OpenRouter and Groq nodes:
 - `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
 - `presence_penalty`: Token presence penalty (-2.0 to 2.0)
 - `response_format`: Choose between text or JSON object output
-- `seed`: Control reproducibility (0 for random)
-- `seed_mode`: Choose between fixed, increment, decrement, or randomize
+- `seed_mode`: Control reproducibility (Fixed, Random, Increment, Decrement)
 - `max_retries`: Maximum retry attempts (0-5) for recoverable errors
 - `image_input`: Optional image for vision-capable models
 - `additional_params`: Optional JSON object for extra model parameters
@@ -70,8 +69,7 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - `presence_penalty`: Token presence penalty (-2.0 to 2.0)
 - `repetition_penalty`: Repetition penalty (1.0-2.0)
 - `response_format`: Choose between text or JSON object output
-- `seed`: Control reproducibility (0 for random)
-- `seed_mode`: Choose between fixed, increment, decrement, or randomize
+- `seed_mode`: Control reproducibility (Fixed, Random, Increment, Decrement)
 - `max_retries`: Number of retry attempts for recoverable errors (0-5)
 - `image_input`: Optional image for vision-capable models
 - `additional_params`: Optional JSON object for extra model parameters
@@ -129,8 +127,7 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 - `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
 - `presence_penalty`: Token presence penalty (-2.0 to 2.0)
 - `response_format`: Choose between text or JSON object output
-- `seed`: Control reproducibility (0 for random)
-- `seed_mode`: Choose between fixed, increment, decrement, or randomize
+- `seed_mode`: Control reproducibility (Fixed, Random, Increment, Decrement)
 - `max_retries`: Number of retry attempts for recoverable errors (0-5)
 - `image_input`: Optional image for vision-capable models
 - `additional_params`: Optional JSON object for extra model parameters
@@ -171,7 +168,7 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 - Select `json_object` format for structured outputs
 - Monitor token usage via the status output
 - Chain multiple nodes for complex workflows
-- Use seed controls for reproducible outputs
+- Use seed_mode for reproducible outputs (Fixed) or controlled variation (Increment/Decrement)
 - Use `additional_params` to set model-specific parameters in JSON format:
   ```json
   {
@@ -188,6 +185,7 @@ Interact with Groq's API for ultra-fast inference with various LLM models.
 - Use presence_penalty to reduce repetition
 - Monitor token usage to optimize costs
 - Save API key in the node for reuse in workflows
+- Use seed_mode for reproducible outputs (Fixed) or controlled variation (Increment/Decrement)
 
 ### Error Handling
 Both nodes provide detailed error messages for common issues:
