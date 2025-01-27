@@ -1,10 +1,10 @@
 # ComfyUI-EACloudNodes
 
-A collection of ComfyUI custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
+A collection of [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
 
 ## Installation
 
-Use ComfyManager or to manually install:
+Use [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) or to manually install:
 
 1. Clone this repository into your ComfyUI custom_nodes folder:
   ```bash
@@ -46,21 +46,26 @@ The following parameters are available in both OpenRouter and Groq nodes:
 ### OpenRouter Chat
 Interact with OpenRouter's API to access various AI models for text and vision tasks.
 
-#### OpenRouter Chat Node
-Interact with OpenRouter's API to access various AI models for text and vision tasks.
+#### Model Selection
+- Choose from a curated list of free models in the dropdown
+- Select "Manual Input" to use any OpenRouter-supported model
+- When using Manual Input, enter the full model identifier in the manual_model field
+- Supports both text and vision models (vision-capable models indicated in name)
 
-##### Additional Features:
-- Access to multiple AI providers through a single API
-- `top_k`: Vocabulary limit (1-1000)
-- `repetition_penalty`: Repetition penalty (1.0-2.0)
-- `base_url`: Configurable OpenRouter API endpoint URL
+#### Available Free Models
+- Google Gemini models (various versions)
+- Meta Llama models (including vision-capable versions)
+- Microsoft Phi models
+- Mistral, Qwen, and other open models
+- Full list viewable in node dropdown
 
-##### Parameters:
-- `api_key`: ⚠️ Your OpenRouter API key (Get from openrouter.ai/settings/keys)
-- `model`: Model identifier from OpenRouter
-- `base_url`: OpenRouter API endpoint URL
-- `user_prompt`: Main prompt/question for the model
+#### Parameters:
+- `api_key`: ⚠️ Your OpenRouter API key (Get from [https://openrouter.ai/keys](https://openrouter.ai/keys))
+- `model`: Select from available models or choose "Manual Input"
+- `manual_model`: Enter custom model name (only used when "Manual Input" is selected)
+- `base_url`: OpenRouter API endpoint URL (default: https://openrouter.ai/api/v1/chat/completions)
 - `system_prompt`: Optional system context setting
+- `user_prompt`: Main prompt/question for the model
 - `temperature`: Controls response randomness (0.0-2.0)
 - `top_p`: Nucleus sampling threshold (0.0-1.0)
 - `top_k`: Vocabulary limit (1-1000)
