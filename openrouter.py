@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import torch
 from torchvision.transforms import ToPILImage
+import random
 
 class OpenrouterNode:
     """
@@ -101,15 +102,15 @@ class OpenrouterNode:
                     "default": "text",
                     "tooltip": "Format of the model's response"
                 }),
-                "seed": ("INT", {
+                "seed_mode": (["fixed", "random", "increment", "decrement"], {
+                    "default": "random",
+                    "tooltip": "Control seed behavior: fixed (use seed value), random (new seed each time), increment/decrement (change by 1)"
+                }),
+                "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
                     "max": 0xffffffffffffffff,
-                    "tooltip": "Seed for reproducible outputs. 0 means random seed."
-                }),
-                "seed_mode": (["fixed", "increment", "decrement", "randomize"], {
-                    "default": "fixed",
-                    "tooltip": "Controls how seed changes between runs"
+                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
                 }),
                 "max_retries": ("INT", {
                     "default": 3,
@@ -144,7 +145,7 @@ class OpenrouterNode:
         temperature: float, top_p: float, top_k: int,
         max_tokens: int, frequency_penalty: float,
         presence_penalty: float, repetition_penalty: float,
-        response_format: str, seed: int, seed_mode: str,
+        response_format: str, seed_mode: str, seed_value: int,
         max_retries: int, image_input=None, additional_params=None
     ) -> tuple[str, str, str]:
         help_text = """ComfyUI-EACloudNodes - OpenRouter Chat
@@ -161,8 +162,8 @@ Key Settings:
 - Max Tokens: Limit response length (1-32768)
 - Frequency/Presence/Repetition Penalties: Control token usage
 - Response Format: Text or JSON output
-- Seed: Control randomness (0 = random)
-- Seed Mode: Fixed/increment/decrement/random
+- Seed Mode: Control reproducibility (fixed/random/increment/decrement)
+- Seed Value: Starting seed for fixed mode or increment/decrement
 - Max Retries: Auto-retry on errors (0-5)
 
 Optional:
@@ -180,14 +181,14 @@ For vision models:
                 return ("", "Error: User prompt is required", help_text)
 
             # Handle seed based on mode
-            if seed_mode == "randomize":
-                import random
+            if seed_mode == "random":
                 seed = random.randint(0, 0xffffffffffffffff)
             elif seed_mode == "increment":
-                seed = (seed + 1) % 0xffffffffffffffff
+                seed = (seed_value + 1) % 0xffffffffffffffff
             elif seed_mode == "decrement":
-                seed = (seed - 1) if seed > 0 else 0xffffffffffffffff
-            # "fixed" mode doesn't modify the seed
+                seed = (seed_value - 1) if seed_value > 0 else 0xffffffffffffffff
+            else:  # "fixed"
+                seed = seed_value
 
             if not api_key.strip():
                 return ("", "Error: OpenRouter API key is required. Get one at openrouter.ai/settings/keys", help_text)
