@@ -201,16 +201,6 @@ Both nodes provide detailed error messages for common issues:
 - Token limits and usage
 - API rate limits and retries
 
-## Changelog
-
-### v0.1.0
-- Initial release
-- Support for Groq and OpenRouter APIs
-- Vision model support
-- Automatic retry mechanism
-- Token usage tracking
-- Seed control options
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
