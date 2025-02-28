@@ -61,7 +61,7 @@ class OpenRouterModels:
         try:
             # Validate API key
             if not api_key.strip():
-                return ("", "Error: API key is required")
+                return "", "🔑 Error: API key is required.\n- Get one at https://openrouter.ai/keys\n- Add it to the api_key field"
 
             # Setup API request
             headers = {
@@ -77,25 +77,27 @@ class OpenRouterModels:
                     timeout=30
                 )
             except requests.exceptions.Timeout:
-                return ("", "Error: Request timed out. Please try again")
+                return "", "⏱️ Error: Request timed out.\n- OpenRouter's servers may be busy\n- Try again later"
             except requests.exceptions.ConnectionError:
-                return ("", "Error: Connection failed. Please check your internet connection")
+                return "", "📶 Error: Connection failed.\n- Check your internet connection\n- OpenRouter servers may be unreachable"
             except requests.exceptions.RequestException as e:
-                return ("", f"Error: Request failed - {str(e)}")
+                return "", f"🌐 Error: Request failed.\n- {str(e)}\n- Check your network connection"
 
-            # Handle API response status codes
+            # Handle API response status codes with clear user guidance
             if response.status_code == 401:
-                return ("", "Error: Invalid API key or unauthorized access")
+                return "", "🔑 Error: Invalid API key or unauthorized access.\n- Check your API key at https://openrouter.ai/keys\n- Ensure it's entered correctly\n- Generate a new key if necessary"
             elif response.status_code == 429:
-                return ("", "Error: Rate limit exceeded. Please wait before trying again")
+                return "", "⚠️ Error: Rate limit exceeded.\n- You've made too many requests\n- Please wait before trying again\n- Consider upgrading your plan"
+            elif response.status_code == 500:
+                return "", "🔧 Error: OpenRouter service error.\n- This is a problem with OpenRouter's servers\n- Check status page: https://status.openrouter.ai/\n- Try again later"
             elif response.status_code != 200:
-                return ("", f"Error: API returned status code {response.status_code}")
+                return "", f"⚠️ Error: API returned status code {response.status_code}.\n- Unexpected error from OpenRouter\n- Try again later"
 
             # Parse JSON response
             try:
                 models_data = response.json().get("data", [])
             except json.JSONDecodeError:
-                return ("", "Error: Invalid JSON response from API")
+                return "", "⚠️ Error: Invalid JSON response from API.\n- OpenRouter returned malformed data\n- Try again later"
 
             # Apply filters if provided
             if filter_text.strip():
@@ -149,9 +151,9 @@ class OpenRouterModels:
                         reverse=(sort_order == "descending")
                     )
             except Exception as sort_err:
-                return ("", f"Error during sorting: {str(sort_err)}")
+                return "", f"⚠️ Error during sorting: {str(sort_err)}.\n- Try a different sort method\n- This may be due to inconsistent model data"
 
-            # Format output with detailed model information
+            # Format output with detailed model information and clear formatting
             model_list = []
             for model in models_data:
                 model_info = (
@@ -167,12 +169,12 @@ class OpenRouterModels:
 
             # Return results with status
             if not model_list:
-                return ("No models found matching your criteria.", "Warning: No models found")
+                return "No models found matching your criteria.", "⚠️ Warning: No models found.\n- Try broadening your filter terms\n- Or check if OpenRouter has available models"
             
-            return ("\n".join(model_list), f"Success: Found {len(models_data)} models")
+            return ("\n".join(model_list), f"✅ Success: Found {len(models_data)} models")
 
         except Exception as e:
-            return ("", f"Unexpected Error: {str(e)}")
+            return "", f"⚠️ Unexpected Error: {str(e)}.\n- Check all input parameters\n- If the error persists, report the issue"
 
 # Node registration
 NODE_CLASS_MAPPINGS = {
@@ -181,4 +183,4 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "OpenRouterModels": "OpenRouter Models"
-} 
+}
