@@ -14,29 +14,39 @@ class OpenrouterNode:
     """
     # Default models list
     DEFAULT_MODELS = [
+        "cognitivecomputations/dolphin3.0-mistral-24b:free",
+        "cognitivecomputations/dolphin3.0-r1-mistral-24b:free",
+        "deepseek/deepseek-chat:free",
+        "deepseek/deepseek-r1-distill-llama-70b:free",
+        "deepseek/deepseek-r1:free",
         "google/gemini-2.0-flash-exp:free",
+        "google/gemini-2.0-flash-lite-preview-02-05:free",
         "google/gemini-2.0-flash-thinking-exp-1219:free",
         "google/gemini-2.0-flash-thinking-exp:free",
-        "google/gemini-exp-1114:free",
-        "google/gemini-exp-1121:free",
+        "google/gemini-2.0-pro-exp-02-05:free",
         "google/gemini-exp-1206:free",
         "google/gemma-2-9b-it:free",
         "google/learnlm-1.5-pro-experimental:free",
         "gryphe/mythomax-l2-13b:free",
         "huggingfaceh4/zephyr-7b-beta:free",
         "meta-llama/llama-3-8b-instruct:free",
-        "meta-llama/llama-3.1-405b-instruct:free",
-        "meta-llama/llama-3.1-70b-instruct:free",
         "meta-llama/llama-3.1-8b-instruct:free",
         "meta-llama/llama-3.2-11b-vision-instruct:free",
         "meta-llama/llama-3.2-1b-instruct:free",
-        "meta-llama/llama-3.2-3b-instruct:free",
-        "meta-llama/llama-3.2-90b-vision-instruct:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
         "microsoft/phi-3-medium-128k-instruct:free",
         "microsoft/phi-3-mini-128k-instruct:free",
         "mistralai/mistral-7b-instruct:free",
+        "mistralai/mistral-nemo:free",
+        "mistralai/mistral-small-24b-instruct-2501:free",
+        "moonshotai/moonlight-16b-a3b-instruct:free",
+        "nousresearch/deephermes-3-llama-3-8b-preview:free",
+        "nvidia/llama-3.1-nemotron-70b-instruct:free",
         "openchat/openchat-7b:free",
         "qwen/qwen-2-7b-instruct:free",
+        "qwen/qwen-2.5-coder-32b-instruct:free",
+        "qwen/qwen-vl-plus:free",
+        "qwen/qwen2.5-vl-72b-instruct:free",
         "sophosympatheia/rogue-rose-103b-v0.2:free",
         "undi95/toppy-m-7b:free",
         "Manual Input"  # Add manual input option
@@ -143,8 +153,8 @@ class OpenrouterNode:
                 "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
-                    "max": 0xffffffffffffffff,
-                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
+                    "max": 9007199254740991,  # 2^53 - 1, max safe integer in JavaScript
+                    "tooltip": "Seed value for 'fixed' mode. Limited to JS safe integer range."
                 }),
                 "max_retries": ("INT", {
                     "default": 3,
@@ -218,33 +228,37 @@ For vision models:
 
             # Validate model
             if model == "Manual Input" and not manual_model.strip():
-                return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
+                return "", "🔑 Error: Manual model identifier is required when 'Manual Input' is selected.\n- Enter a valid model ID in the manual_model field", help_text
 
             # Add user prompt validation
             if not user_prompt.strip():
-                return ("", "Error: User prompt is required", help_text)
+                return "", "❌ Error: User prompt is required.\n- Please enter a prompt in the user_prompt field", help_text
 
-            # Handle seed based on mode
+            # Handle seed based on mode, limiting to JS safe integer range (2^53 - 1)
+            # This avoids the "seed has type number" error with the API
+            MAX_SAFE_INT = 9007199254740991  # 2^53 - 1, max safe integer in JavaScript
+            
             if seed_mode == "random":
-                seed = random.randint(0, 0xffffffffffffffff)
+                seed = random.randint(0, MAX_SAFE_INT)
             elif seed_mode == "increment":
-                seed = (seed_value + 1) % 0xffffffffffffffff
+                seed = (seed_value + 1) % MAX_SAFE_INT
             elif seed_mode == "decrement":
-                seed = (seed_value - 1) if seed_value > 0 else 0xffffffffffffffff
+                seed = (seed_value - 1) if seed_value > 0 else MAX_SAFE_INT
             else:  # "fixed"
-                seed = seed_value
+                # Ensure seed value is within safe range
+                seed = min(seed_value, MAX_SAFE_INT)
 
             if not api_key.strip():
-                return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
+                return "", "🔑 Error: OpenRouter API key is required.\n- Get one at https://openrouter.ai/keys\n- Add it to the api_key field", help_text
 
             if not actual_model.strip():
-                return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
+                return "", "❌ Error: Model identifier required.\n- Choose a model from the dropdown\n- Or specify a custom model (e.g., 'anthropic/claude-3-opus')", help_text
 
             if not base_url.strip():
-                return ("", "Error: OpenRouter API endpoint URL is required", help_text)
+                return "", "❌ Error: OpenRouter API endpoint URL is required.\n- The default URL should work in most cases\n- Only change if you know what you're doing", help_text
 
             if not base_url.startswith(("http://", "https://")):
-                return ("", "Error: Invalid API endpoint URL format", help_text)
+                return "", "❌ Error: Invalid API endpoint URL format.\n- URL must start with http:// or https://\n- Use the default URL if unsure: https://openrouter.ai/api/v1/chat/completions", help_text
 
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -275,7 +289,7 @@ For vision models:
                         if image_input.dim() == 4:
                             image_input = image_input.squeeze(0)
                         if image_input.dim() != 3:
-                            return ("", "Error: Image tensor must be 3D after squeezing", help_text)
+                            return "", "❌ Error: Image tensor must be 3D after squeezing.\n- Check your image processing chain\n- Ensure the image has valid dimensions", help_text
                         
                         # Ensure correct channel order
                         if image_input.shape[-1] in [1, 3, 4]:  # HWC format
@@ -285,11 +299,11 @@ For vision models:
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
                     else:
-                        return ("", "Error: Unsupported image input type", help_text)
+                        return "", "❌ Error: Unsupported image input type.\n- Make sure you're connecting a valid image output\n- Try using a LoadImage or other image-producing node", help_text
 
                     # Add size validation
                     if pil_image.size[0] * pil_image.size[1] > 2048 * 2048:
-                        return ("", "Error: Image too large. Maximum size is 2048x2048. Please resize your image.", help_text)
+                        return "", "❌ Error: Image too large.\n- Maximum size is 2048x2048\n- Please resize your image\n- Try using a ResizeImage node", help_text
                     
                     # Convert image to base64
                     buffered = io.BytesIO()
@@ -309,7 +323,7 @@ For vision models:
                         {"role": "user", "content": user_content}
                     ]
                 except Exception as img_err:
-                    return ("", f"Image Processing Error: {str(img_err)}", help_text)
+                    return "", f"🖼️ Image Processing Error: {str(img_err)}.\n- Check that your image is valid\n- Try using a different image\n- If using a tensor, ensure valid format", help_text
 
             # Prepare request body with standard parameters
             body = {
@@ -335,7 +349,7 @@ For vision models:
                     extra_params = json.loads(additional_params)
                     body.update(extra_params)
                 except json.JSONDecodeError:
-                    return ("", "Error: Invalid JSON in additional parameters. Example format: {\"top_k\": 50}", help_text)
+                    return "", "❌ Error: Invalid JSON in additional parameters.\n- Check your JSON syntax\n- Example format: {\"top_k\": 50}", help_text
 
             # Add detailed error handling for the API response
             retries = 0
@@ -353,17 +367,39 @@ For vision models:
                         time.sleep(2 ** retries)  # 2, 4, 8, 16... seconds
                         continue
                     
-                    # Handle different response status codes
+                    # Enhanced error handling with user guidance
                     if response.status_code == 401:
-                        return ("", "Error: Invalid API key or unauthorized access", help_text)
+                        return "", "🔑 Error: Invalid API key or unauthorized access.\n- Check your API key at https://openrouter.ai/keys\n- Ensure it's entered correctly\n- Generate a new key if necessary", help_text
                     elif response.status_code == 429:
-                        return ("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
+                        return "", f"⚠️ Error: Rate limit exceeded. Tried {retries} times.\n- Your account has reached its request limit\n- Consider upgrading your plan or using paid models\n- Try again later", help_text
                     elif response.status_code == 500:
-                        return ("", f"Error: OpenRouter service error. Tried {retries} times", help_text)
+                        return "", f"🔧 Error: OpenRouter service error.\n- This is a problem with OpenRouter's servers, not your request\n- Check OpenRouter status: https://status.openrouter.ai/\n- Try again later", help_text
                     elif response.status_code == 400:
-                        return ("", "Error: Bad request - check model name and parameters", help_text)
+                        error_msg = "Bad request"
+                        try:
+                            error_data = response.json()
+                            if "error" in error_data:
+                                error_msg = error_data.get("error", {}).get("message", "Bad request")
+                        except:
+                            pass
+                        return "", f"❌ Error: {error_msg}\n- Check your parameters (especially model name)\n- Verify prompt format and content\n- Ensure inputs are correctly formatted", help_text
+                    elif response.status_code == 404:
+                        return "", f"❓ Error: Model '{actual_model}' not found.\n- Check if the model name is correct\n- Select a different model from the dropdown\n- Use the OpenRouterModels node to see available models", help_text
                     elif response.status_code == 413:
-                        return ("", "Error: Payload too large - try reducing prompt or image size", help_text)
+                        return "", "⚠️ Error: Payload too large.\n- Try reducing prompt length\n- Resize your image to smaller dimensions\n- Use a more compressed image format", help_text
+                    elif response.status_code == 502:
+                        return "", f"🔌 Error: Model provider is unavailable.\n- The specific model provider ({actual_model.split('/')[0]}) may be down\n- Try a different model from another provider\n- Check OpenRouter status: https://status.openrouter.ai/", help_text
+                    elif response.status_code == 504:
+                        return "", f"⏱️ Error: Gateway timeout.\n- The request took too long to process\n- Try with a smaller prompt, smaller image, or fewer tokens\n- Use a faster model\n- Try again later", help_text
+                    elif response.status_code != 200:
+                        error_msg = "Unknown error"
+                        try:
+                            error_data = response.json()
+                            if "error" in error_data:
+                                error_msg = error_data.get("error", {}).get("message", "Unknown error")
+                        except:
+                            pass
+                        return "", f"⚠️ Error: API returned status {response.status_code}: {error_msg}.\n- Tried {retries} times\n- Check OpenRouter status: https://status.openrouter.ai/\n- Try again with different parameters", help_text
                     
                     response.raise_for_status()
                     response_json = response.json()
@@ -373,23 +409,27 @@ For vision models:
                     tokens = response_json.get("usage", {})
                     prompt_tokens = tokens.get("prompt_tokens", 0)
                     completion_tokens = tokens.get("completion_tokens", 0)
-                    status_msg = f"Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
+                    status_msg = f"✅ Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
 
                     if "choices" in response_json and len(response_json["choices"]) > 0:
                         assistant_message = response_json["choices"][0].get("message", {}).get("content", "")
                         return (assistant_message, status_msg, help_text)
                     else:
-                        return ("", "Error: No response content from the model", help_text)
+                        return "", "❓ Error: No response content from the model.\n- Try simplifying your request\n- Use a different model\n- Check if your prompt follows model guidelines", help_text
 
                 except requests.exceptions.Timeout:
-                    return ("", "Error: Request timed out. Please try again", help_text)
+                    return "", "⏱️ Error: Request timed out.\n- OpenRouter or the model provider's servers may be overloaded\n- Try again later\n- Consider using a different model", help_text
+                except requests.exceptions.ConnectionError:
+                    return "", "📶 Error: Connection failed.\n- Check your internet connection\n- OpenRouter's servers may be unreachable\n- Try again later", help_text
                 except requests.exceptions.RequestException as req_err:
-                    return ("", f"Request Error: {str(req_err)}", help_text)
+                    return "", f"🌐 Request Error: {str(req_err)}\n- This is likely a network issue\n- Check your internet connection\n- Try again later", help_text
                 except json.JSONDecodeError:
-                    return ("", "Error: Invalid JSON response from OpenRouter", help_text)
+                    return "", "⚠️ Error: Invalid JSON response from OpenRouter.\n- The service returned malformed data\n- Try again later or with a different model", help_text
+                except Exception as e:
+                    return "", f"⚠️ Unexpected Error: {str(e)}\n- Try again with different parameters\n- If the error persists, try a different model", help_text
 
         except Exception as e:
-            return ("", f"Unexpected Error: {str(e)}", help_text)
+            return "", f"⚠️ Unexpected Error: {str(e)}\n- Check all input parameters\n- Verify your API key and model selection\n- If the error persists, report the issue", help_text
 
 # Node registration
 NODE_CLASS_MAPPINGS = {
