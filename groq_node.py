@@ -16,7 +16,13 @@ class GroqNode:
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
     
-    # Default models list from Groq documentation - updated April 2025
+    # Models that support vision capabilities
+    VISION_MODELS = [
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "meta-llama/llama-4-scout-17b-16e-instruct"
+    ]
+    
+    # Default models list from Groq documentation - updated based on current availability
     DEFAULT_MODELS = [
         # Production Models
         "llama-3.3-70b-versatile",  # Default model
@@ -29,19 +35,14 @@ class GroqNode:
         "whisper-large-v3",
         "whisper-large-v3-turbo",
         # Preview Models
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
-        "qwen-qwq-32b",
-        "mistral-saba-24b",
-        "qwen-2.5-coder-32b",
-        "qwen-2.5-32b",
-        "deepseek-r1-distill-qwen-32b",
+        "allam-2-7b",
         "deepseek-r1-distill-llama-70b",
-        "llama-3.3-70b-specdec",
-        "llama-3.2-11b-vision-preview",
-        "llama-3.2-90b-vision-preview",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",  # Vision-capable
+        "meta-llama/llama-4-scout-17b-16e-instruct",      # Vision-capable
+        "mistral-saba-24b",
         "playai-tts",
         "playai-tts-arabic",
+        "qwen-qwq-32b",
         "Manual Input"  # Add this option at the end
     ]
     
@@ -155,7 +156,7 @@ class GroqNode:
             },
             "optional": {
                 "image_input": ("IMAGE", {
-                    "tooltip": "Optional image input for vision-capable models"
+                    "tooltip": "Optional image input for vision-capable models (currently only Llama-4 models support vision)"
                 }),
                 "additional_params": ("STRING", {
                     "multiline": True,
@@ -213,14 +214,13 @@ Key Settings:
 - Debug Mode: Enable to get detailed error messages
 
 Optional:
-- Image Input: For vision-capable models
+- Image Input: Only for Llama-4 models (Scout and Maverick)
 - Additional Params: Extra model parameters
 
-For vision models:
-1. Select a vision-capable model (containing "vision" in name)
-2. Toggle 'send_system' to 'no'
-3. Connect image to 'image_input'
-4. Describe or ask about the image in user_prompt"""
+Vision Support:
+Currently only these models support vision inputs:
+- meta-llama/llama-4-maverick-17b-128e-instruct
+- meta-llama/llama-4-scout-17b-16e-instruct"""
 
         try:
             # Validate and sanitize numeric inputs
@@ -273,12 +273,12 @@ For vision models:
             if not api_key.strip():
                 return "", "Error: Groq API key is required. Get one at console.groq.com/keys", help_text
 
-            # Check if this is a vision model
-            is_vision_model = "vision" in actual_model.lower()
+            # Check if model supports vision capabilities
+            is_vision_model = actual_model in self.VISION_MODELS
 
             # Vision model validation
             if image_input is not None and not is_vision_model:
-                return "", f"Error: Model '{actual_model}' does not support vision inputs. Please select a model with 'vision' in its name.", help_text
+                return "", f"Error: Model '{actual_model}' does not support vision inputs. Only the following Groq models support vision: {', '.join(self.VISION_MODELS)}", help_text
 
             # Initialize messages list
             messages = []
@@ -290,8 +290,8 @@ For vision models:
                     "content": system_prompt
                 })
 
-            # Handle different message formats based on whether it's a vision model
-            if image_input is not None:
+            # Handle different message formats based on whether it's a vision model with image
+            if image_input is not None and is_vision_model:
                 try:
                     # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
