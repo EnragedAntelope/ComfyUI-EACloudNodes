@@ -13,33 +13,45 @@ class GroqNode:
     Supports text and vision-language models through Groq's API.
     """
     
-    # Default models list from Groq documentation
+    # Default models list from Groq documentation - updated April 2025
     DEFAULT_MODELS = [
         # Production Models
-        "distil-whisper-large-v3-en",
-        "gemma2-9b-it",
-        "llama-3.3-70b-versatile",
+        "llama-3.3-70b-versatile",  # Default model
         "llama-3.1-8b-instant",
         "llama-guard-3-8b",
         "llama3-70b-8192",
         "llama3-8b-8192",
-        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+        "distil-whisper-large-v3-en",
         "whisper-large-v3",
         "whisper-large-v3-turbo",
         # Preview Models
-        "deepseek-r1-distill-llama-70b",
-        "deepseek-r1-distill-llama-70b-specdec",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "qwen-qwq-32b",
+        "mistral-saba-24b",
+        "qwen-2.5-coder-32b",
+        "qwen-2.5-32b",
         "deepseek-r1-distill-qwen-32b",
+        "deepseek-r1-distill-llama-70b",
         "llama-3.3-70b-specdec",
-        "llama-3.2-1b-preview",
-        "llama-3.2-3b-preview",
         "llama-3.2-11b-vision-preview",
         "llama-3.2-90b-vision-preview",
-        "mistral-saba-24b",
-        "qwen-2.5-32b",
-        "qwen-2.5-coder-32b",
+        "playai-tts",
+        "playai-tts-arabic",
         "Manual Input"  # Add this option at the end
     ]
+    
+    def __init__(self):
+        # Initialize parameter values with defaults
+        self.temperature = 0.7
+        self.top_p = 0.7
+        self.max_completion_tokens = 1000
+        self.frequency_penalty = 0.0
+        self.presence_penalty = 0.0
+        self.seed_value = 0
+        self.last_seed = 0
+        self.max_retries = 3
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -127,8 +139,8 @@ class GroqNode:
                 "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
-                    "max": 9007199254740991,  # 2^53 - 1, max safe integer in JavaScript
-                    "tooltip": "Seed value for 'fixed' mode. Limited to JS safe integer range."
+                    "max": 0xffffffffffffffff,
+                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
                 }),
                 "max_retries": ("INT", {
                     "default": 3,
@@ -151,6 +163,13 @@ class GroqNode:
             }
         }
 
+    # Add update method to handle UI value changes
+    def update(self, **kwargs):
+        # Handle updates to parameters
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+        return
+
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("response", "status", "help",)
     FUNCTION = "chat_completion"
@@ -168,6 +187,15 @@ class GroqNode:
         """
         Handles chat completion requests to Groq API
         """
+        # Store current parameter values
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_completion_tokens = max_completion_tokens
+        self.frequency_penalty = frequency_penalty
+        self.presence_penalty = presence_penalty
+        self.seed_value = seed_value
+        self.max_retries = max_retries
+        
         help_text = """ComfyUI-EACloudNodes - Groq Chat
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
@@ -198,38 +226,53 @@ For vision models:
 4. Describe or ask about the image in user_prompt"""
 
         try:
+            # Validate and sanitize numeric inputs to ensure proper UI feedback
+            temperature = max(0.0, min(2.0, float(temperature)))
+            top_p = max(0.0, min(1.0, float(top_p))) 
+            max_completion_tokens = max(1, min(32768, int(max_completion_tokens)))
+            frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
+            presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
+            max_retries = max(0, min(5, int(max_retries)))
+            
+            # Update instance variables with sanitized values
+            self.temperature = temperature
+            self.top_p = top_p
+            self.max_completion_tokens = max_completion_tokens
+            self.frequency_penalty = frequency_penalty
+            self.presence_penalty = presence_penalty
+            self.max_retries = max_retries
+
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model if model == "Manual Input" else model
 
             # Validate model
             if model == "Manual Input" and not manual_model.strip():
-                return "", "🔑 Error: Manual model identifier is required when 'Manual Input' is selected.\n- Enter a valid model ID in the manual_model field", help_text
+                return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
 
             # Validate user prompt
             if not user_prompt.strip():
-                return "", "❌ Error: User prompt is required.\n- Please enter a prompt in the user_prompt field", help_text
+                return "", "Error: User prompt is required", help_text
 
-            # Handle seed based on mode, limiting to JS safe integer range (2^53 - 1)
-            # This avoids the "seed has type number" error with the Groq API
-            MAX_SAFE_INT = 9007199254740991  # 2^53 - 1, max safe integer in JavaScript
-            
+            # Handle seed based on mode
             if seed_mode == "random":
-                seed = random.randint(0, MAX_SAFE_INT)
+                seed = random.randint(0, 0xffffffffffffffff)
             elif seed_mode == "increment":
-                seed = (seed_value + 1) % MAX_SAFE_INT
+                seed = (self.last_seed + 1) % 0xffffffffffffffff
             elif seed_mode == "decrement":
-                seed = (seed_value - 1) if seed_value > 0 else MAX_SAFE_INT
+                seed = (self.last_seed - 1) if self.last_seed > 0 else 0xffffffffffffffff
             else:  # "fixed"
-                # Ensure seed value is within safe range
-                seed = min(seed_value, MAX_SAFE_INT)
+                seed = seed_value
+            
+            # Store the seed we're using
+            self.last_seed = seed
 
             # Validate API key
             if not api_key.strip():
-                return "", "🔑 Error: Groq API key is required.\n- Get one at console.groq.com/keys\n- Add it to the api_key field", help_text
+                return "", "Error: Groq API key is required. Get one at console.groq.com/keys", help_text
 
             # Vision model validation
             if image_input is not None and "vision" not in model.lower():
-                return "", f"❌ Error: Model '{model}' does not support vision inputs.\n- Please select a vision-capable model (has 'vision' in the name)\n- Or remove the image input connection", help_text
+                return "", f"Error: Model '{model}' does not support vision inputs. Please select a vision-capable model.", help_text
 
             # Initialize messages list
             messages = []
@@ -251,7 +294,7 @@ For vision models:
                         if image_input.dim() == 4:
                             image_input = image_input.squeeze(0)
                         if image_input.dim() != 3:
-                            return "", "❌ Error: Image tensor must be 3D after squeezing.\n- Check your image processing chain\n- Ensure the image has valid dimensions", help_text
+                            return "", "Error: Image tensor must be 3D after squeezing", help_text
                         
                         if image_input.shape[-1] in [1, 3, 4]:
                             image_input = image_input.permute(2, 0, 1)
@@ -260,7 +303,7 @@ For vision models:
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
                     else:
-                        return "", "❌ Error: Unsupported image input type.\n- Make sure you're connecting a valid image output\n- Try using a LoadImage or other image-producing node", help_text
+                        return "", "Error: Unsupported image input type", help_text
 
                     buffered = io.BytesIO()
                     pil_image.save(buffered, format="PNG")
@@ -273,7 +316,7 @@ For vision models:
                         }
                     })
                 except Exception as img_err:
-                    return "", f"🖼️ Image Processing Error: {str(img_err)}.\n- Check that your image is valid\n- Try using a different image\n- If using a tensor, ensure valid format", help_text
+                    return "", f"Image Processing Error: {str(img_err)}", help_text
 
             # Add user message
             messages.append({
@@ -303,7 +346,7 @@ For vision models:
                     extra_params = json.loads(additional_params)
                     body.update(extra_params)
                 except json.JSONDecodeError:
-                    return "", "❌ Error: Invalid JSON in additional parameters.\n- Check your JSON syntax\n- Example format: {\"top_k\": 50}", help_text
+                    return "", "Error: Invalid JSON in additional parameters. Example format: {\"top_k\": 50}", help_text
 
             # Make API request with retry logic
             retries = 0
@@ -329,35 +372,13 @@ For vision models:
                         time.sleep(2 ** retries)  # 2, 4, 8, 16... seconds
                         continue
 
-                    # Enhanced error handling with user guidance
+                    # Handle response
                     if response.status_code == 401:
-                        return "", "🔑 Error: Invalid API key.\n- Check your API key at https://console.groq.com/keys\n- Ensure it's entered correctly\n- Create a new key if necessary", help_text
+                        return "", "Error: Invalid API key", help_text
                     elif response.status_code == 429:
-                        return "", f"⚠️ Error: Rate limit exceeded. Tried {retries} times.\n- Your account has reached its request limit\n- Consider upgrading your plan\n- Try again later", help_text
-                    elif response.status_code == 400:
-                        error_msg = "Bad request"
-                        try:
-                            error_data = response.json()
-                            if "error" in error_data:
-                                error_msg = error_data["error"].get("message", "Bad request")
-                        except:
-                            pass
-                        return "", f"❌ Error: {error_msg}\n- Check your parameters (especially model name)\n- Verify prompt format and content\n- Ensure inputs are correctly formatted", help_text
-                    elif response.status_code == 404:
-                        return "", f"❓ Error: Model '{actual_model}' not found.\n- Check if the model name is correct\n- Select a different model from the dropdown\n- Verify the model exists in Groq's catalog", help_text
-                    elif response.status_code == 500:
-                        return "", f"🔧 Error: Groq service error.\n- This is a problem with Groq's servers, not your request\n- Check Groq status page: https://status.groq.com/\n- Try again later", help_text
-                    elif response.status_code == 503:
-                        return "", f"🚧 Error: Groq service temporarily unavailable.\n- The service may be down for maintenance\n- Check Groq status page: https://status.groq.com/\n- Try again later", help_text
+                        return "", f"Error: Rate limit exceeded. Tried {retries} times", help_text
                     elif response.status_code != 200:
-                        error_msg = "Unknown error"
-                        try:
-                            error_data = response.json()
-                            if "error" in error_data:
-                                error_msg = error_data["error"].get("message", "Unknown error")
-                        except:
-                            pass
-                        return "", f"⚠️ Error: API returned status {response.status_code}: {error_msg}.\n- Tried {retries} times\n- Check Groq status page: https://status.groq.com/\n- Try again with different parameters", help_text
+                        return "", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text
 
                     response_json = response.json()
                     
@@ -366,25 +387,19 @@ For vision models:
                     tokens = response_json.get("usage", {})
                     prompt_tokens = tokens.get("prompt_tokens", 0)
                     completion_tokens = tokens.get("completion_tokens", 0)
-                    status_msg = f"✅ Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
+                    status_msg = f"Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
 
                     if "choices" in response_json and len(response_json["choices"]) > 0:
                         content = response_json["choices"][0].get("message", {}).get("content", "")
                         return (content, status_msg, help_text)
                     else:
-                        return "", "❓ Error: No response content from model.\n- Try simplifying your request\n- Use a different model\n- Check if your prompt follows model guidelines", help_text
+                        return "", "Error: No response content from model", help_text
 
-                except requests.exceptions.Timeout:
-                    return "", "⏱️ Error: Request timed out.\n- Groq's servers may be overloaded\n- Try again later\n- Consider using a different model", help_text
-                except requests.exceptions.ConnectionError:
-                    return "", "📶 Error: Connection failed.\n- Check your internet connection\n- Groq's servers may be unreachable\n- Try again later", help_text
-                except requests.exceptions.RequestException as req_err:
-                    return "", f"🌐 Request Error: {str(req_err)}\n- This is likely a network issue\n- Check your internet connection\n- Try again later", help_text
                 except Exception as e:
-                    return "", f"⚠️ Unexpected Error: {str(e)}\n- Try again with different parameters\n- If the error persists, try a different model", help_text
+                    return "", f"Unexpected Error: {str(e)}", help_text
 
         except Exception as e:
-            return "", f"⚠️ Unexpected Error: {str(e)}\n- Check all input parameters\n- Verify your API key and model selection\n- If the error persists, report the issue", help_text
+            return "", f"Unexpected Error: {str(e)}", help_text
 
 # Node registration
 NODE_CLASS_MAPPINGS = {
