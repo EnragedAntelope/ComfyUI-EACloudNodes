@@ -1,6 +1,7 @@
 import base64
 import json
 import requests
+import time
 from PIL import Image
 import io
 import torch
@@ -40,7 +41,7 @@ class OpenrouterNode:
         "deepseek/deepseek-r1-distill-llama-70b:free",
         "openchat/openchat-7b:free",
         "sophosympatheia/rogue-rose-103b-v0.2:free",
-        "Manual Input"  # Add manual input option
+        "Manual Input"
     ]
     
     def __init__(self):
@@ -91,7 +92,7 @@ class OpenrouterNode:
                     "multiline": True,
                     "default": "You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
                     "tooltip": "Optional system prompt to set context/behavior",
-                    "lines": a4
+                    "lines": 4
                 }),
                 "send_system": (["yes", "no"], {
                     "default": "yes",
@@ -157,7 +158,7 @@ class OpenrouterNode:
                 "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
-                    "max": 9007199254740991,  # JavaScript safe integer limit
+                    "max": 9007199254740991,
                     "tooltip": "Seed value for 'fixed' mode. Ignored in other modes. (0-9007199254740991)"
                 }),
                 "max_retries": ("INT", {
@@ -185,8 +186,8 @@ class OpenrouterNode:
             }
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING",)
-    RETURN_NAMES = ("response", "status", "help",)
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("response", "status", "help")
     FUNCTION = "chat_completion"
     CATEGORY = "OpenRouter"
     OUTPUT_NODE = True
@@ -416,9 +417,8 @@ For vision models:
                     
                     if response.status_code in retryable_codes and retries < max_retries:
                         retries += 1
-                        # Add exponential backoff
-                        import time
-                        time.sleep(2 ** retries)  # 2, 4, 8, 16... seconds
+                        # Exponential backoff before retrying
+                        time.sleep(2 ** retries)
                         continue
                     
                     # For 400 errors, try to get detailed error information
@@ -427,16 +427,13 @@ For vision models:
                             error_json = response.json()
                             error_message = error_json.get("error", {}).get("message", "Unknown error")
                             
-                            # If debug mode is on, provide more detailed error info
                             if debug_mode == "on":
                                 return "", f"Error 400: {error_message}\nRequest body: {json.dumps(body, indent=2)}", help_text
                             else:
                                 return "", f"Error 400: {error_message}", help_text
                         except Exception:
-                            # If we can't parse the error, fall back to basic message
                             return "", "Error: Bad request - check model name and parameters (enable debug mode for details)", help_text
                     
-                    # Handle different response status codes
                     if response.status_code == 401:
                         return ("", "Error: Invalid API key or unauthorized access", help_text)
                     elif response.status_code == 429:
@@ -468,14 +465,12 @@ For vision models:
                 except requests.exceptions.Timeout:
                     if retries < max_retries:
                         retries += 1
-                        import time
                         time.sleep(2 ** retries)
                         continue
                     return ("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
                 except requests.exceptions.RequestException as req_err:
                     if retries < max_retries:
                         retries += 1
-                        import time
                         time.sleep(2 ** retries)
                         continue
                     return ("", f"Request Error: {str(req_err)}. Tried {retries} times.", help_text)
@@ -483,14 +478,8 @@ For vision models:
                     return ("", "Error: Invalid JSON response from OpenRouter", help_text)
                 except Exception as e:
                     return ("", f"Unexpected Error: {str(e)}", help_text)
-                
-                # Break out of retry loop if we reach here
-                break
 
-        except Exception as e:
-            return ("", f"Unexpected Error: {str(e)}", help_text)
-
-# Node registration
+    # Node registration
 NODE_CLASS_MAPPINGS = {
     "OpenrouterNode": OpenrouterNode
 }
