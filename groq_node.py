@@ -144,6 +144,10 @@ class GroqNode:
                     "max": 5,
                     "step": 1,
                     "tooltip": "Maximum number of retry attempts for recoverable errors"
+                }),
+                "debug_mode": (["off", "on"], {
+                    "default": "off",
+                    "tooltip": "Enable debug mode to get more detailed error messages"
                 })
             },
             "optional": {
@@ -159,7 +163,6 @@ class GroqNode:
             }
         }
 
-    # Fixed update method to properly handle UI input events
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("response", "status", "help",)
     FUNCTION = "chat_completion"
@@ -172,7 +175,7 @@ class GroqNode:
         temperature: float, top_p: float, max_completion_tokens: int,
         frequency_penalty: float, presence_penalty: float,
         response_format: str, seed_mode: str, seed_value: int,
-        max_retries: int, image_input=None, additional_params=None
+        max_retries: int, debug_mode: str, image_input=None, additional_params=None
     ) -> tuple[str, str, str]:
         """
         Handles chat completion requests to Groq API
@@ -204,13 +207,14 @@ Key Settings:
 - Seed Mode: Fixed/random/increment/decrement
 - Seed Value: Seed value for 'fixed' mode
 - Max Retries: Auto-retry on errors (0-5)
+- Debug Mode: Enable to get detailed error messages
 
 Optional:
 - Image Input: For vision-capable models
 - Additional Params: Extra model parameters
 
 For vision models:
-1. Select a vision-capable model
+1. Select a vision-capable model (containing "vision" in name)
 2. Toggle 'send_system' to 'no'
 3. Connect image to 'image_input'
 4. Describe or ask about the image in user_prompt"""
@@ -263,10 +267,6 @@ For vision models:
             if not api_key.strip():
                 return "", "Error: Groq API key is required. Get one at console.groq.com/keys", help_text
 
-            # Vision model validation
-            if image_input is not None and "vision" not in model.lower():
-                return "", f"Error: Model '{model}' does not support vision inputs. Please select a vision-capable model.", help_text
-
             # Initialize messages list
             messages = []
             
@@ -277,12 +277,16 @@ For vision models:
                     "content": system_prompt
                 })
 
-            # Prepare user message content
-            user_content = [{"type": "text", "text": user_prompt}]
+            # Check if this is a vision model
+            is_vision_model = "vision" in actual_model.lower()
 
-            # Handle image input if provided
+            # Handle different message formats based on whether it's a vision model
             if image_input is not None:
+                if not is_vision_model:
+                    return "", f"Error: Model '{actual_model}' does not support vision inputs. Please select a model with 'vision' in its name.", help_text
+                
                 try:
+                    # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
                         if image_input.dim() == 4:
                             image_input = image_input.squeeze(0)
@@ -298,36 +302,48 @@ For vision models:
                     else:
                         return "", "Error: Unsupported image input type", help_text
 
+                    # Convert image to base64
                     buffered = io.BytesIO()
                     pil_image.save(buffered, format="PNG")
                     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
                     
-                    user_content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{img_str}"
-                        }
+                    # Add user message with image for vision models
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
+                        ]
                     })
                 except Exception as img_err:
                     return "", f"Image Processing Error: {str(img_err)}", help_text
+            else:
+                # Add text-only user message
+                messages.append({
+                    "role": "user",
+                    "content": user_prompt
+                })
 
-            # Add user message
-            messages.append({
-                "role": "user",
-                "content": user_content
-            })
-
-            # Prepare request body
+            # Prepare request body with only supported parameters
             body = {
                 "model": actual_model,
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
-                "frequency_penalty": frequency_penalty,
-                "presence_penalty": presence_penalty,
-                "max_tokens": max_completion_tokens,
-                "seed": seed
+                "max_tokens": max_completion_tokens
             }
+            
+            # Only add seed if it's supported (it is on most Groq models)
+            if seed is not None:
+                body["seed"] = seed
+                
+            # Only add frequency_penalty and presence_penalty if they're non-zero
+            # as not all Groq models support these parameters
+            if frequency_penalty != 0:
+                body["frequency_penalty"] = frequency_penalty
+                
+            if presence_penalty != 0:
+                body["presence_penalty"] = presence_penalty
 
             # Add response format if json_object is selected
             if response_format == "json_object":
@@ -364,8 +380,23 @@ For vision models:
                         import time
                         time.sleep(2 ** retries)  # 2, 4, 8, 16... seconds
                         continue
+                    
+                    # For 400 errors, try to get detailed error information
+                    if response.status_code == 400:
+                        try:
+                            error_json = response.json()
+                            error_message = error_json.get("error", {}).get("message", "Unknown error")
+                            
+                            # If debug mode is on, provide more detailed error info
+                            if debug_mode == "on":
+                                return "", f"Error 400: {error_message}\nRequest body: {json.dumps(body, indent=2)}", help_text
+                            else:
+                                return "", f"Error 400: {error_message}", help_text
+                        except Exception:
+                            # If we can't parse the error, fall back to basic message
+                            return "", "Error: Bad request - check model name and parameters (enable debug mode for details)", help_text
 
-                    # Handle response
+                    # Handle other response codes
                     if response.status_code == 401:
                         return "", "Error: Invalid API key", help_text
                     elif response.status_code == 429:
@@ -388,8 +419,14 @@ For vision models:
                     else:
                         return "", "Error: No response content from model", help_text
 
-                except Exception as e:
-                    return "", f"Unexpected Error: {str(e)}", help_text
+                except requests.exceptions.RequestException as req_err:
+                    # Only retry network-related errors
+                    if retries < max_retries:
+                        retries += 1
+                        import time
+                        time.sleep(2 ** retries)
+                        continue
+                    return "", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text
                 
                 # Break out of retry loop if we reach here
                 break
