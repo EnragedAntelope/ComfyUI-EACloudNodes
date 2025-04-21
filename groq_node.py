@@ -71,7 +71,7 @@ class GroqNode:
                 "manual_model": ("STRING", {
                     "multiline": False,
                     "default": "",
-                    "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)",
+                    "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)"
                 }),
                 "system_prompt": ("STRING", {
                     "multiline": True,
@@ -152,7 +152,7 @@ class GroqNode:
                     "max": 5,
                     "step": 1,
                     "tooltip": "Maximum number of retry attempts for recoverable errors"
-                }),
+                })
             },
             "optional": {
                 "image_input": ("IMAGE", {
@@ -163,7 +163,7 @@ class GroqNode:
                     "default": "",
                     "tooltip": "Additional Groq parameters in JSON format",
                     "lines": 6
-                }),
+                })
             }
         }
 
