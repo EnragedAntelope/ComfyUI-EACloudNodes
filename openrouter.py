@@ -90,22 +90,18 @@ class OpenrouterNode:
                     "tooltip": "Optional system prompt to set context/behavior",
                     "lines": 4
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "temperature": ("FLOAT", {
                     "default": 0.7,
                     "min": 0.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "top_p": ("FLOAT", {
                     "default": 0.7,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
                 }),
                 "top_k": ("INT", {
@@ -122,31 +118,25 @@ class OpenrouterNode:
                     "step": 1,
                     "tooltip": "Maximum number of tokens to generate (1-32768)"
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "frequency_penalty": ("FLOAT", {
                     "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "presence_penalty": ("FLOAT", {
                     "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "repetition_penalty": ("FLOAT", {
                     "default": 1.1,
                     "min": 1.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Penalizes repetition (1.0 = off, >1.0 = more penalty)"
                 }),
                 "response_format": (["text", "json_object"], {
@@ -183,29 +173,6 @@ class OpenrouterNode:
                 })
             }
         }
-
-    # Improved update method to fix UI interaction issues
-    def update(self, **kwargs):
-        # Handle updates to parameters
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                # Convert numeric values to the appropriate type with error handling
-                if key in ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty', 'repetition_penalty']:
-                    try:
-                        value = float(value)
-                    except (ValueError, TypeError):
-                        # Keep original value if conversion fails
-                        value = getattr(self, key)
-                elif key in ['top_k', 'max_tokens', 'seed_value', 'max_retries']:
-                    try:
-                        value = int(value)
-                    except (ValueError, TypeError):
-                        # Keep original value if conversion fails
-                        value = getattr(self, key)
-                # Update the attribute
-                setattr(self, key, value)
-        # Return immediately to acknowledge update
-        return (None,)
 
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("response", "status", "help",)
