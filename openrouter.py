@@ -12,6 +12,9 @@ class OpenrouterNode:
     A node for interacting with OpenRouter API.
     Supports text and vision-language models through OpenRouter's API.
     """
+    # JavaScript safe integer limit (2^53 - 1)
+    MAX_SAFE_INTEGER = 9007199254740991
+    
     # Default models list - updated April 2025
     DEFAULT_MODELS = [
         "google/gemini-2.5-pro-exp:free",
@@ -154,8 +157,8 @@ class OpenrouterNode:
                 "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
-                    "max": 0xffffffffffffffff,
-                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
+                    "max": 9007199254740991,  # JavaScript safe integer limit
+                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes. (0-9007199254740991)"
                 }),
                 "max_retries": ("INT", {
                     "default": 3,
@@ -218,6 +221,7 @@ Key Settings:
 - Repetition Penalty: Control repetition
 - Response Format: Text or JSON output
 - Seed Mode: Fixed/random/increment/decrement
+- Seed Value: Seed for 'fixed' mode (0-9007199254740991)
 - Max Retries: Auto-retry on errors (0-5)
 - Debug Mode: Enable to get detailed error messages
 
@@ -241,6 +245,8 @@ For vision models:
                 presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
                 repetition_penalty = max(1.0, min(2.0, float(repetition_penalty)))
                 max_retries = max(0, min(5, int(max_retries)))
+                # Ensure seed is within JavaScript safe integer limits
+                seed_value = max(0, min(self.MAX_SAFE_INTEGER, int(seed_value)))
             except (ValueError, TypeError) as e:
                 return "", f"Error: Invalid parameter value - {str(e)}", help_text
                 
@@ -268,11 +274,11 @@ For vision models:
 
             # Handle seed based on mode
             if seed_mode == "random":
-                seed = random.randint(0, 0xffffffffffffffff)
+                seed = random.randint(0, self.MAX_SAFE_INTEGER)
             elif seed_mode == "increment":
-                seed = (self.last_seed + 1) % 0xffffffffffffffff
+                seed = (self.last_seed + 1) % self.MAX_SAFE_INTEGER
             elif seed_mode == "decrement":
-                seed = (self.last_seed - 1) if self.last_seed > 0 else 0xffffffffffffffff
+                seed = (self.last_seed - 1) if self.last_seed > 0 else self.MAX_SAFE_INTEGER
             else:  # "fixed"
                 seed = seed_value
                 
