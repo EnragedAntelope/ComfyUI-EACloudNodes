@@ -63,252 +63,6 @@ class OpenrouterNode:
                     "tooltip": "⚠️ Your OpenRouter API key from https://openrouter.ai/keys (Note: key will be visible - take care when sharing workflows)",
                     "password": True,
                     "sensitive": True
-                }),
-                "model": (cls.DEFAULT_MODELS, {
-                    "default": "google/gemma-2-9b-it:free",
-                    "tooltip": "Select a model from the list or choose 'Manual Input' to specify a custom model"
-                }),
-                "manual_model": ("STRING", {
-                    "multiline": False,
-                    "default": "",
-                    "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)",
-                }),
-                "base_url": ("STRING", {
-                    "multiline": False,
-                    "default": "https://openrouter.ai/api/v1/chat/completions",
-                    "tooltip": "OpenRouter API endpoint URL"
-                }),
-                "user_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "Main prompt/question for the model",
-                    "lines": 8
-                }),
-                "system_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": "You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
-                    "tooltip": "Optional system prompt to set context/behavior",
-                    "lines": 4
-                }),
-                "temperature": ("FLOAT", {
-                    "default": 0.7,
-                    "min": 0.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
-                    "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
-                }),
-                "top_p": ("FLOAT", {
-                    "default": 0.7,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.01,
-                    "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
-                    "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
-                }),
-                "top_k": ("INT", {
-                    "default": 50,
-                    "min": 1,
-                    "max": 1000,
-                    "step": 1,
-                    "display": "number",  # Added display property for better UI interaction
-                    "tooltip": "Limits vocabulary to top K tokens"
-                }),
-                "max_tokens": ("INT", {
-                    "default": 1000,
-                    "min": 1,
-                    "max": 32768,
-                    "step": 1,
-                    "display": "number",  # Added display property for better UI interaction
-                    "tooltip": "Maximum number of tokens to generate (1-32768)"
-                }),
-                "frequency_penalty": ("FLOAT", {
-                    "default": 0.0,
-                    "min": -2.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
-                    "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
-                }),
-                "presence_penalty": ("FLOAT", {
-                    "default": 0.0,
-                    "min": -2.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
-                    "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
-                }),
-                "repetition_penalty": ("FLOAT", {
-                    "default": 1.1,
-                    "min": 1.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
-                    "tooltip": "Penalizes repetition (1.0 = off, >1.0 = more penalty)"
-                }),
-                "response_format": (["text", "json_object"], {
-                    "default": "text",
-                    "tooltip": "Format of the model's response"
-                }),
-                "seed_mode": (["fixed", "random", "increment", "decrement"], {
-                    "default": "random",
-                    "tooltip": "Control seed behavior: fixed (use seed value), random (new seed each time), increment/decrement (change by 1)"
-                }),
-                "seed_value": ("INT", {
-                    "default": 0,
-                    "min": 0,
-                    "max": 0xffffffffffffffff,
-                    "display": "number",  # Added display property for better UI interaction
-                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
-                }),
-                "max_retries": ("INT", {
-                    "default": 3,
-                    "min": 0,
-                    "max": 5,
-                    "step": 1,
-                    "display": "number",  # Added display property for better UI interaction
-                    "tooltip": "Maximum number of retry attempts for recoverable errors"
-                }),
-            },
-            "optional": {
-                "image_input": ("IMAGE", {
-                    "tooltip": "Optional image input for vision-capable models"
-                }),
-                "additional_params": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "Additional OpenRouter parameters in JSON format",
-                    "lines": 6
-                }),
-            }
-        }
-
-    # Improved update method to fix UI interaction issues
-    def update(self, **kwargs):
-        # Handle updates to parameters
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                # Convert numeric values to the appropriate type
-                if key in ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty', 'repetition_penalty']:
-                    value = float(value)
-                elif key in ['top_k', 'max_tokens', 'seed_value', 'max_retries']:
-                    value = int(value)
-                # Update the attribute
-                setattr(self, key, value)
-        # Return immediately to acknowledge update
-        return (None,)
-
-    RETURN_TYPES = ("STRING", "STRING", "STRING",)
-    RETURN_NAMES = ("response", "status", "help",)
-    FUNCTION = "chat_completion"
-    CATEGORY = "OpenRouter"
-    OUTPUT_NODE = True
-
-    def chat_completion(
-        self, api_key: str, model: str, manual_model: str,
-        base_url: str,
-        user_prompt: str, system_prompt: str,
-        temperature: float, top_p: float, top_k: int,
-        max_tokens: int, frequency_penalty: float,
-        presence_penalty: float, repetition_penalty: float,
-        response_format: str, seed_mode: str, seed_value: int,
-        max_retries: int, image_input=None, additional_params=None
-    ) -> tuple[str, str, str]:
-        help_text = """ComfyUI-EACloudNodes - OpenRouter Chat
-Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
-
-Key Settings:
-- API Key: Get from https://openrouter.ai/keys
-- Model: Choose from dropdown or use Manual Input
-- Manual Model: Custom model ID (when Manual Input selected)
-- System Prompt: Set behavior/context
-- User Prompt: Main input for the model
-- Temperature: 0.0 (focused) to 2.0 (creative)
-- Top-p: Nucleus sampling threshold
-- Top-k: Vocabulary limit
-- Max Tokens: Limit response length
-- Frequency Penalty: Control token frequency
-- Presence Penalty: Control token presence
-- Repetition Penalty: Control repetition
-- Response Format: Text or JSON output
-- Seed Mode: Fixed/random/increment/decrement
-- Max Retries: Auto-retry on errors (0-5)
-
-Optional:
-- Image Input: For vision-capable models
-- Additional Params: Extra model parameters
-
-For vision models:
-1. Select a vision-capable model
-2. Connect image to 'image_input'
-3. Describe or ask about the image in user_prompt"""
-
-        try:
-            # Store current parameter values
-            self.temperature = temperature
-            self.top_p = top_p
-            self.top_k = top_k
-            self.max_tokens = max_tokens
-            self.frequency_penalty = frequency_penalty
-            self.presence_penalty = presence_penalty
-            self.repetition_penalty = repetition_penalty
-            self.seed_value = seed_value
-            self.max_retries = max_retries
-            
-            # Use manual_model if "Manual Input" is selected
-            actual_model = manual_model if model == "Manual Input" else model
-
-            # Validate model
-            if model == "Manual Input" and not manual_model.strip():
-                return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
-
-            # Add user prompt validation
-            if not user_prompt.strip():
-                return ("", "Error: User prompt is required", help_text)
-
-            # Handle seed based on mode
-            if seed_mode == "random":
-                seed = random.randint(0, 0xffffffffffffffff)
-            elif seed_mode == "increment":
-                seed = (self.last_seed + 1) % 0xffffffffffffffff
-            elif seed_mode == "decrement":
-                seed = (self.last_seed - 1) if self.last_seed > 0 else 0xffffffffffffffff
-            else:  # "fixed"
-                seed = seed_value
-                
-            # Store the seed we're using
-            self.last_seed = seed
-
-            if not api_key.strip():
-                return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
-
-            if not actual_model.strip():
-                return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
-
-            if not base_url.strip():
-                return ("", "Error: OpenRouter API endpoint URL is required", help_text)
-
-            if not base_url.startswith(("http://", "https://")):
-                return ("", "Error: Invalid API endpoint URL format", help_text)
-
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-
-            # Initialize messages list
-            messages = []
-            
-            # Add system prompt if provided
-            if system_prompt.strip():
-                messages.append({
-                    "role": "system",
-                    "content": system_prompt
                 })
 
             # Prepare user message content
@@ -457,4 +211,256 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "OpenrouterNode": "OpenRouter Chat"
-}
+},
+                "model": (cls.DEFAULT_MODELS, {
+                    "default": "google/gemma-2-9b-it:free",
+                    "tooltip": "Select a model from the list or choose 'Manual Input' to specify a custom model"
+                }),
+                "manual_model": ("STRING", {
+                    "multiline": False,
+                    "default": "",
+                    "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)",
+                }),
+                "base_url": ("STRING", {
+                    "multiline": False,
+                    "default": "https://openrouter.ai/api/v1/chat/completions",
+                    "tooltip": "OpenRouter API endpoint URL"
+                }),
+                "user_prompt": ("STRING", {
+                    "multiline": True,
+                    "default": "",
+                    "tooltip": "Main prompt/question for the model",
+                    "lines": 8
+                }),
+                "system_prompt": ("STRING", {
+                    "multiline": True,
+                    "default": "You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
+                    "tooltip": "Optional system prompt to set context/behavior",
+                    "lines": 4
+                }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
+                "temperature": ("FLOAT", {
+                    "default": 0.7,
+                    "min": 0.0,
+                    "max": 2.0,
+                    "step": 0.01,
+                    "round": 2,
+                    "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
+                }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
+                "top_p": ("FLOAT", {
+                    "default": 0.7,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.01,
+                    "round": 2,
+                    "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
+                }),
+                "top_k": ("INT", {
+                    "default": 50,
+                    "min": 1,
+                    "max": 1000,
+                    "step": 1,
+                    "tooltip": "Limits vocabulary to top K tokens"
+                }),
+                "max_tokens": ("INT", {
+                    "default": 1000,
+                    "min": 1,
+                    "max": 32768,
+                    "step": 1,
+                    "tooltip": "Maximum number of tokens to generate (1-32768)"
+                }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
+                "frequency_penalty": ("FLOAT", {
+                    "default": 0.0,
+                    "min": -2.0,
+                    "max": 2.0,
+                    "step": 0.01,
+                    "round": 2,
+                    "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
+                }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
+                "presence_penalty": ("FLOAT", {
+                    "default": 0.0,
+                    "min": -2.0,
+                    "max": 2.0,
+                    "step": 0.01,
+                    "round": 2,
+                    "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
+                }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
+                "repetition_penalty": ("FLOAT", {
+                    "default": 1.1,
+                    "min": 1.0,
+                    "max": 2.0,
+                    "step": 0.01,
+                    "round": 2,
+                    "tooltip": "Penalizes repetition (1.0 = off, >1.0 = more penalty)"
+                }),
+                "response_format": (["text", "json_object"], {
+                    "default": "text",
+                    "tooltip": "Format of the model's response"
+                }),
+                "seed_mode": (["fixed", "random", "increment", "decrement"], {
+                    "default": "random",
+                    "tooltip": "Control seed behavior: fixed (use seed value), random (new seed each time), increment/decrement (change by 1)"
+                }),
+                "seed_value": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 0xffffffffffffffff,
+                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
+                }),
+                "max_retries": ("INT", {
+                    "default": 3,
+                    "min": 0,
+                    "max": 5,
+                    "step": 1,
+                    "tooltip": "Maximum number of retry attempts for recoverable errors"
+                }),
+            },
+            "optional": {
+                "image_input": ("IMAGE", {
+                    "tooltip": "Optional image input for vision-capable models"
+                }),
+                "additional_params": ("STRING", {
+                    "multiline": True,
+                    "default": "",
+                    "tooltip": "Additional OpenRouter parameters in JSON format",
+                    "lines": 6
+                }),
+            }
+        }
+
+    # Improved update method to fix UI interaction issues
+    def update(self, **kwargs):
+        # Handle updates to parameters
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                # Convert numeric values to the appropriate type with error handling
+                if key in ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty', 'repetition_penalty']:
+                    try:
+                        value = float(value)
+                    except (ValueError, TypeError):
+                        # Keep original value if conversion fails
+                        value = getattr(self, key)
+                elif key in ['top_k', 'max_tokens', 'seed_value', 'max_retries']:
+                    try:
+                        value = int(value)
+                    except (ValueError, TypeError):
+                        # Keep original value if conversion fails
+                        value = getattr(self, key)
+                # Update the attribute
+                setattr(self, key, value)
+        # Return immediately to acknowledge update
+        return (None,)
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING",)
+    RETURN_NAMES = ("response", "status", "help",)
+    FUNCTION = "chat_completion"
+    CATEGORY = "OpenRouter"
+    OUTPUT_NODE = True
+
+    def chat_completion(
+        self, api_key: str, model: str, manual_model: str,
+        base_url: str,
+        user_prompt: str, system_prompt: str,
+        temperature: float, top_p: float, top_k: int,
+        max_tokens: int, frequency_penalty: float,
+        presence_penalty: float, repetition_penalty: float,
+        response_format: str, seed_mode: str, seed_value: int,
+        max_retries: int, image_input=None, additional_params=None
+    ) -> tuple[str, str, str]:
+        help_text = """ComfyUI-EACloudNodes - OpenRouter Chat
+Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
+
+Key Settings:
+- API Key: Get from https://openrouter.ai/keys
+- Model: Choose from dropdown or use Manual Input
+- Manual Model: Custom model ID (when Manual Input selected)
+- System Prompt: Set behavior/context
+- User Prompt: Main input for the model
+- Temperature: 0.0 (focused) to 2.0 (creative)
+- Top-p: Nucleus sampling threshold
+- Top-k: Vocabulary limit
+- Max Tokens: Limit response length
+- Frequency Penalty: Control token frequency
+- Presence Penalty: Control token presence
+- Repetition Penalty: Control repetition
+- Response Format: Text or JSON output
+- Seed Mode: Fixed/random/increment/decrement
+- Max Retries: Auto-retry on errors (0-5)
+
+Optional:
+- Image Input: For vision-capable models
+- Additional Params: Extra model parameters
+
+For vision models:
+1. Select a vision-capable model
+2. Connect image to 'image_input'
+3. Describe or ask about the image in user_prompt"""
+
+        try:
+            # Validate and sanitize numeric inputs with error handling
+            try:
+                temperature = max(0.0, min(2.0, float(temperature)))
+                top_p = max(0.0, min(1.0, float(top_p)))
+                top_k = max(1, min(1000, int(top_k)))
+                max_tokens = max(1, min(32768, int(max_tokens)))
+                frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
+                presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
+                repetition_penalty = max(1.0, min(2.0, float(repetition_penalty)))
+                max_retries = max(0, min(5, int(max_retries)))
+            except (ValueError, TypeError) as e:
+                return "", f"Error: Invalid parameter value - {str(e)}", help_text
+                
+            # Use manual_model if "Manual Input" is selected
+            actual_model = manual_model if model == "Manual Input" else model
+
+            # Validate model
+            if model == "Manual Input" and not manual_model.strip():
+                return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
+
+            # Add user prompt validation
+            if not user_prompt.strip():
+                return ("", "Error: User prompt is required", help_text)
+
+            # Handle seed based on mode
+            if seed_mode == "random":
+                seed = random.randint(0, 0xffffffffffffffff)
+            elif seed_mode == "increment":
+                seed = (self.last_seed + 1) % 0xffffffffffffffff
+            elif seed_mode == "decrement":
+                seed = (self.last_seed - 1) if self.last_seed > 0 else 0xffffffffffffffff
+            else:  # "fixed"
+                seed = seed_value
+                
+            # Store the seed we're using
+            self.last_seed = seed
+
+            if not api_key.strip():
+                return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
+
+            if not actual_model.strip():
+                return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
+
+            if not base_url.strip():
+                return ("", "Error: OpenRouter API endpoint URL is required", help_text)
+
+            if not base_url.startswith(("http://", "https://")):
+                return ("", "Error: Invalid API endpoint URL format", help_text)
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+
+            # Initialize messages list
+            messages = []
+            
+            # Add system prompt if provided
+            if system_prompt.strip():
+                messages.append({
+                    "role": "system",
+                    "content": system_prompt
+                })
