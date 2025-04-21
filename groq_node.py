@@ -13,6 +13,9 @@ class GroqNode:
     Supports text and vision-language models through Groq's API.
     """
     
+    # JavaScript safe integer limit (2^53 - 1)
+    MAX_SAFE_INTEGER = 9007199254740991
+    
     # Default models list from Groq documentation - updated April 2025
     DEFAULT_MODELS = [
         # Production Models
@@ -135,8 +138,8 @@ class GroqNode:
                 "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
-                    "max": 0xffffffffffffffff,
-                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
+                    "max": 9007199254740991,  # JavaScript safe integer limit
+                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes. (0-9007199254740991)"
                 }),
                 "max_retries": ("INT", {
                     "default": 3,
@@ -205,7 +208,7 @@ Key Settings:
 - Presence Penalty: Control token presence
 - Response Format: Text or JSON output
 - Seed Mode: Fixed/random/increment/decrement
-- Seed Value: Seed value for 'fixed' mode
+- Seed Value: Seed for 'fixed' mode (0-9007199254740991)
 - Max Retries: Auto-retry on errors (0-5)
 - Debug Mode: Enable to get detailed error messages
 
@@ -228,6 +231,8 @@ For vision models:
                 frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
                 presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
                 max_retries = max(0, min(5, int(max_retries)))
+                # Ensure seed is within JavaScript safe integer limits
+                seed_value = max(0, min(self.MAX_SAFE_INTEGER, int(seed_value)))
             except (ValueError, TypeError) as e:
                 return "", f"Error: Invalid parameter value - {str(e)}", help_text
             
@@ -238,6 +243,7 @@ For vision models:
             self.frequency_penalty = frequency_penalty
             self.presence_penalty = presence_penalty
             self.max_retries = max_retries
+            self.seed_value = seed_value
 
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model if model == "Manual Input" else model
@@ -252,11 +258,11 @@ For vision models:
 
             # Handle seed based on mode
             if seed_mode == "random":
-                seed = random.randint(0, 0xffffffffffffffff)
+                seed = random.randint(0, self.MAX_SAFE_INTEGER)
             elif seed_mode == "increment":
-                seed = (self.last_seed + 1) % 0xffffffffffffffff
+                seed = (self.last_seed + 1) % self.MAX_SAFE_INTEGER
             elif seed_mode == "decrement":
-                seed = (self.last_seed - 1) if self.last_seed > 0 else 0xffffffffffffffff
+                seed = (self.last_seed - 1) if self.last_seed > 0 else self.MAX_SAFE_INTEGER
             else:  # "fixed"
                 seed = seed_value
             
@@ -266,6 +272,13 @@ For vision models:
             # Validate API key
             if not api_key.strip():
                 return "", "Error: Groq API key is required. Get one at console.groq.com/keys", help_text
+
+            # Check if this is a vision model
+            is_vision_model = "vision" in actual_model.lower()
+
+            # Vision model validation
+            if image_input is not None and not is_vision_model:
+                return "", f"Error: Model '{actual_model}' does not support vision inputs. Please select a model with 'vision' in its name.", help_text
 
             # Initialize messages list
             messages = []
@@ -277,14 +290,8 @@ For vision models:
                     "content": system_prompt
                 })
 
-            # Check if this is a vision model
-            is_vision_model = "vision" in actual_model.lower()
-
             # Handle different message formats based on whether it's a vision model
             if image_input is not None:
-                if not is_vision_model:
-                    return "", f"Error: Model '{actual_model}' does not support vision inputs. Please select a model with 'vision' in its name.", help_text
-                
                 try:
                     # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
