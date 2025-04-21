@@ -89,22 +89,18 @@ class GroqNode:
                     "default": "yes",
                     "tooltip": "Some models (especially vision models) don't accept system prompts. Toggle 'no' to skip sending the system prompt."
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "temperature": ("FLOAT", {
                     "default": 0.7,
                     "min": 0.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "top_p": ("FLOAT", {
                     "default": 0.7,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
                 }),
                 "max_completion_tokens": ("INT", {
@@ -114,22 +110,18 @@ class GroqNode:
                     "step": 1,
                     "tooltip": "Maximum number of tokens to generate (1-32768)"
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "frequency_penalty": ("FLOAT", {
                     "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
                 }),
-                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "presence_penalty": ("FLOAT", {
                     "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
-                    "round": 2,
                     "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
                 }),
                 "response_format": (["text", "json_object"], {
@@ -167,29 +159,7 @@ class GroqNode:
             }
         }
 
-    # Improved update method to fix UI interaction issues
-    def update(self, **kwargs):
-        # Handle updates to parameters
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                # Convert numeric values to the appropriate type
-                if key in ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty']:
-                    try:
-                        value = float(value)
-                    except (ValueError, TypeError):
-                        # Keep original value if conversion fails
-                        value = getattr(self, key)
-                elif key in ['max_completion_tokens', 'seed_value', 'max_retries']:
-                    try:
-                        value = int(value)
-                    except (ValueError, TypeError):
-                        # Keep original value if conversion fails
-                        value = getattr(self, key)
-                # Update the attribute
-                setattr(self, key, value)
-        # Return immediately to acknowledge update
-        return (None,)
-
+    # Fixed update method to properly handle UI input events
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("response", "status", "help",)
     FUNCTION = "chat_completion"
@@ -420,6 +390,9 @@ For vision models:
 
                 except Exception as e:
                     return "", f"Unexpected Error: {str(e)}", help_text
+                
+                # Break out of retry loop if we reach here
+                break
 
         except Exception as e:
             return "", f"Unexpected Error: {str(e)}", help_text
