@@ -91,7 +91,7 @@ class OpenrouterNode:
                     "multiline": True,
                     "default": "You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
                     "tooltip": "Optional system prompt to set context/behavior",
-                    "lines": 4
+                    "lines": a4
                 }),
                 "send_system": (["yes", "no"], {
                     "default": "yes",
@@ -455,7 +455,9 @@ For vision models:
                     tokens = response_json.get("usage", {})
                     prompt_tokens = tokens.get("prompt_tokens", 0)
                     completion_tokens = tokens.get("completion_tokens", 0)
-                    status_msg = f"Success: Used {model_used} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
+                    
+                    # Add seed to status message so user can see what was used
+                    status_msg = f"Success: Used {model_used} | Seed: {seed} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
 
                     if "choices" in response_json and len(response_json["choices"]) > 0:
                         assistant_message = response_json["choices"][0].get("message", {}).get("content", "")
