@@ -89,22 +89,22 @@ class GroqNode:
                     "default": "yes",
                     "tooltip": "Some models (especially vision models) don't accept system prompts. Toggle 'no' to skip sending the system prompt."
                 }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "temperature": ("FLOAT", {
                     "default": 0.7,
                     "min": 0.0,
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
                 }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "top_p": ("FLOAT", {
                     "default": 0.7,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.01,
                     "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
                 }),
                 "max_completion_tokens": ("INT", {
@@ -112,25 +112,24 @@ class GroqNode:
                     "min": 1,
                     "max": 32768,
                     "step": 1,
-                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Maximum number of tokens to generate (1-32768)"
                 }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "frequency_penalty": ("FLOAT", {
                     "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
                 }),
+                # Updated slider control to fix jumping issue - removed "display": "slider"
                 "presence_penalty": ("FLOAT", {
                     "default": 0.0,
                     "min": -2.0,
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
-                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
                 }),
                 "response_format": (["text", "json_object"], {
@@ -145,7 +144,6 @@ class GroqNode:
                     "default": 0,
                     "min": 0,
                     "max": 0xffffffffffffffff,
-                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
                 }),
                 "max_retries": ("INT", {
@@ -153,7 +151,6 @@ class GroqNode:
                     "min": 0,
                     "max": 5,
                     "step": 1,
-                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Maximum number of retry attempts for recoverable errors"
                 }),
             },
@@ -177,9 +174,17 @@ class GroqNode:
             if hasattr(self, key):
                 # Convert numeric values to the appropriate type
                 if key in ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty']:
-                    value = float(value)
+                    try:
+                        value = float(value)
+                    except (ValueError, TypeError):
+                        # Keep original value if conversion fails
+                        value = getattr(self, key)
                 elif key in ['max_completion_tokens', 'seed_value', 'max_retries']:
-                    value = int(value)
+                    try:
+                        value = int(value)
+                    except (ValueError, TypeError):
+                        # Keep original value if conversion fails
+                        value = getattr(self, key)
                 # Update the attribute
                 setattr(self, key, value)
         # Return immediately to acknowledge update
@@ -241,13 +246,16 @@ For vision models:
 4. Describe or ask about the image in user_prompt"""
 
         try:
-            # Validate and sanitize numeric inputs to ensure proper UI feedback
-            temperature = max(0.0, min(2.0, float(temperature)))
-            top_p = max(0.0, min(1.0, float(top_p))) 
-            max_completion_tokens = max(1, min(32768, int(max_completion_tokens)))
-            frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
-            presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
-            max_retries = max(0, min(5, int(max_retries)))
+            # Validate and sanitize numeric inputs
+            try:
+                temperature = max(0.0, min(2.0, float(temperature)))
+                top_p = max(0.0, min(1.0, float(top_p))) 
+                max_completion_tokens = max(1, min(32768, int(max_completion_tokens)))
+                frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
+                presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
+                max_retries = max(0, min(5, int(max_retries)))
+            except (ValueError, TypeError) as e:
+                return "", f"Error: Invalid parameter value - {str(e)}", help_text
             
             # Update instance variables with sanitized values
             self.temperature = temperature
