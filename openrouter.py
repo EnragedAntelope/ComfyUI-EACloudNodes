@@ -90,6 +90,10 @@ class OpenrouterNode:
                     "tooltip": "Optional system prompt to set context/behavior",
                     "lines": 4
                 }),
+                "send_system": (["yes", "no"], {
+                    "default": "yes",
+                    "tooltip": "Some models don't accept system prompts. Toggle 'no' to skip sending the system prompt."
+                }),
                 "temperature": ("FLOAT", {
                     "default": 0.7,
                     "min": 0.0,
@@ -159,6 +163,10 @@ class OpenrouterNode:
                     "max": 5,
                     "step": 1,
                     "tooltip": "Maximum number of retry attempts for recoverable errors"
+                }),
+                "debug_mode": (["off", "on"], {
+                    "default": "off",
+                    "tooltip": "Enable debug mode to get more detailed error messages"
                 })
             },
             "optional": {
@@ -183,12 +191,12 @@ class OpenrouterNode:
     def chat_completion(
         self, api_key: str, model: str, manual_model: str,
         base_url: str,
-        user_prompt: str, system_prompt: str,
+        user_prompt: str, system_prompt: str, send_system: str,
         temperature: float, top_p: float, top_k: int,
         max_tokens: int, frequency_penalty: float,
         presence_penalty: float, repetition_penalty: float,
         response_format: str, seed_mode: str, seed_value: int,
-        max_retries: int, image_input=None, additional_params=None
+        max_retries: int, debug_mode: str, image_input=None, additional_params=None
     ) -> tuple[str, str, str]:
         help_text = """ComfyUI-EACloudNodes - OpenRouter Chat
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
@@ -197,7 +205,9 @@ Key Settings:
 - API Key: Get from https://openrouter.ai/keys
 - Model: Choose from dropdown or use Manual Input
 - Manual Model: Custom model ID (when Manual Input selected)
-- System Prompt: Set behavior/context
+- Base URL: API endpoint (usually leave as default)
+- System Prompt: Set behavior/context 
+- Send System: Toggle system prompt on/off
 - User Prompt: Main input for the model
 - Temperature: 0.0 (focused) to 2.0 (creative)
 - Top-p: Nucleus sampling threshold
@@ -209,18 +219,19 @@ Key Settings:
 - Response Format: Text or JSON output
 - Seed Mode: Fixed/random/increment/decrement
 - Max Retries: Auto-retry on errors (0-5)
+- Debug Mode: Enable to get detailed error messages
 
 Optional:
 - Image Input: For vision-capable models
 - Additional Params: Extra model parameters
 
 For vision models:
-1. Select a vision-capable model
+1. Select a vision-capable model (containing "vision" in name)
 2. Connect image to 'image_input'
 3. Describe or ask about the image in user_prompt"""
 
         try:
-            # Validate and sanitize numeric inputs with error handling
+            # Validate and sanitize numeric inputs
             try:
                 temperature = max(0.0, min(2.0, float(temperature)))
                 top_p = max(0.0, min(1.0, float(top_p)))
@@ -268,17 +279,27 @@ For vision models:
             # Store the seed we're using
             self.last_seed = seed
 
+            # Validate API key
             if not api_key.strip():
                 return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
 
+            # Validate model identifier
             if not actual_model.strip():
                 return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
 
+            # Validate base URL
             if not base_url.strip():
                 return ("", "Error: OpenRouter API endpoint URL is required", help_text)
 
             if not base_url.startswith(("http://", "https://")):
                 return ("", "Error: Invalid API endpoint URL format", help_text)
+
+            # Check if this is likely a vision model
+            is_vision_model = "vision" in actual_model.lower()
+            
+            # Vision model validation
+            if image_input is not None and not is_vision_model:
+                return "", f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' in its name.", help_text
 
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -288,15 +309,12 @@ For vision models:
             # Initialize messages list
             messages = []
             
-            # Add system prompt if provided
-            if system_prompt.strip():
+            # Add system prompt if provided and enabled
+            if system_prompt.strip() and send_system == "yes":
                 messages.append({
                     "role": "system",
                     "content": system_prompt
                 })
-
-            # Prepare user message content
-            user_content = user_prompt  # Default to direct text for non-image messages
 
             # Handle image input if provided
             if image_input is not None:
@@ -327,41 +345,47 @@ For vision models:
                     pil_image.save(buffered, format="PNG")
                     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
                     
-                    # Add image to user content
-                    user_content = [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
-                    ]
+                    # Add user message with image for vision models
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
+                        ]
+                    })
                 except Exception as img_err:
                     return ("", f"Image Processing Error: {str(img_err)}", help_text)
-
-            # Add user message with the appropriate content format
-            if isinstance(user_content, list):
-                # We've already constructed the formatted content for vision models
-                messages.append({
-                    "role": "user",
-                    "content": user_content
-                })
             else:
-                # Simple text message
+                # Add text-only user message
                 messages.append({
                     "role": "user",
-                    "content": user_content
+                    "content": user_prompt
                 })
 
-            # Prepare request body with standard parameters
+            # Prepare request body with only supported parameters
             body = {
                 "model": actual_model,
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
-                "top_k": top_k,
-                "frequency_penalty": frequency_penalty,
-                "presence_penalty": presence_penalty,
-                "repetition_penalty": repetition_penalty,
-                "max_tokens": max_tokens,
-                "seed": seed
+                "max_tokens": max_tokens
             }
+            
+            # Only add conditional parameters if they have non-default values
+            if top_k != 50:
+                body["top_k"] = top_k
+                
+            if frequency_penalty != 0:
+                body["frequency_penalty"] = frequency_penalty
+                
+            if presence_penalty != 0:
+                body["presence_penalty"] = presence_penalty
+                
+            if repetition_penalty != 1:
+                body["repetition_penalty"] = repetition_penalty
+                
+            if seed is not None:
+                body["seed"] = seed
 
             # Add response format if json_object is selected
             if response_format == "json_object":
@@ -391,6 +415,21 @@ For vision models:
                         time.sleep(2 ** retries)  # 2, 4, 8, 16... seconds
                         continue
                     
+                    # For 400 errors, try to get detailed error information
+                    if response.status_code == 400:
+                        try:
+                            error_json = response.json()
+                            error_message = error_json.get("error", {}).get("message", "Unknown error")
+                            
+                            # If debug mode is on, provide more detailed error info
+                            if debug_mode == "on":
+                                return "", f"Error 400: {error_message}\nRequest body: {json.dumps(body, indent=2)}", help_text
+                            else:
+                                return "", f"Error 400: {error_message}", help_text
+                        except Exception:
+                            # If we can't parse the error, fall back to basic message
+                            return "", "Error: Bad request - check model name and parameters (enable debug mode for details)", help_text
+                    
                     # Handle different response status codes
                     if response.status_code == 401:
                         return ("", "Error: Invalid API key or unauthorized access", help_text)
@@ -398,12 +437,11 @@ For vision models:
                         return ("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
                     elif response.status_code == 500:
                         return ("", f"Error: OpenRouter service error. Tried {retries} times", help_text)
-                    elif response.status_code == 400:
-                        return ("", "Error: Bad request - check model name and parameters", help_text)
                     elif response.status_code == 413:
                         return ("", "Error: Payload too large - try reducing prompt or image size", help_text)
+                    elif response.status_code != 200:
+                        return ("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
                     
-                    response.raise_for_status()
                     response_json = response.json()
 
                     # Extract useful information for status
@@ -420,13 +458,23 @@ For vision models:
                         return ("", "Error: No response content from the model", help_text)
 
                 except requests.exceptions.Timeout:
-                    return ("", "Error: Request timed out. Please try again", help_text)
+                    if retries < max_retries:
+                        retries += 1
+                        import time
+                        time.sleep(2 ** retries)
+                        continue
+                    return ("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
                 except requests.exceptions.RequestException as req_err:
-                    return ("", f"Request Error: {str(req_err)}", help_text)
+                    if retries < max_retries:
+                        retries += 1
+                        import time
+                        time.sleep(2 ** retries)
+                        continue
+                    return ("", f"Request Error: {str(req_err)}. Tried {retries} times.", help_text)
                 except json.JSONDecodeError:
                     return ("", "Error: Invalid JSON response from OpenRouter", help_text)
                 except Exception as e:
-                    return ("", f"Network Error: {str(e)}", help_text)
+                    return ("", f"Unexpected Error: {str(e)}", help_text)
                 
                 # Break out of retry loop if we reach here
                 break
