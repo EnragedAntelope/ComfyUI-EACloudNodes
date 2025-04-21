@@ -95,6 +95,8 @@ class OpenrouterNode:
                     "min": 0.0,
                     "max": 2.0,
                     "step": 0.01,
+                    "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
                 }),
                 "top_p": ("FLOAT", {
@@ -103,6 +105,7 @@ class OpenrouterNode:
                     "max": 1.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
                 }),
                 "top_k": ("INT", {
@@ -110,6 +113,7 @@ class OpenrouterNode:
                     "min": 1,
                     "max": 1000,
                     "step": 1,
+                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Limits vocabulary to top K tokens"
                 }),
                 "max_tokens": ("INT", {
@@ -117,6 +121,7 @@ class OpenrouterNode:
                     "min": 1,
                     "max": 32768,
                     "step": 1,
+                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Maximum number of tokens to generate (1-32768)"
                 }),
                 "frequency_penalty": ("FLOAT", {
@@ -125,6 +130,7 @@ class OpenrouterNode:
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
                 }),
                 "presence_penalty": ("FLOAT", {
@@ -133,6 +139,7 @@ class OpenrouterNode:
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
                 }),
                 "repetition_penalty": ("FLOAT", {
@@ -141,6 +148,7 @@ class OpenrouterNode:
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Penalizes repetition (1.0 = off, >1.0 = more penalty)"
                 }),
                 "response_format": (["text", "json_object"], {
@@ -155,6 +163,7 @@ class OpenrouterNode:
                     "default": 0,
                     "min": 0,
                     "max": 0xffffffffffffffff,
+                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
                 }),
                 "max_retries": ("INT", {
@@ -162,6 +171,7 @@ class OpenrouterNode:
                     "min": 0,
                     "max": 5,
                     "step": 1,
+                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Maximum number of retry attempts for recoverable errors"
                 }),
             },
@@ -178,12 +188,20 @@ class OpenrouterNode:
             }
         }
 
-    # Add update method to handle UI value changes (this was missing)
+    # Improved update method to fix UI interaction issues
     def update(self, **kwargs):
         # Handle updates to parameters
         for key, value in kwargs.items():
-            setattr(self, key, value)
-        return
+            if hasattr(self, key):
+                # Convert numeric values to the appropriate type
+                if key in ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty', 'repetition_penalty']:
+                    value = float(value)
+                elif key in ['top_k', 'max_tokens', 'seed_value', 'max_retries']:
+                    value = int(value)
+                # Update the attribute
+                setattr(self, key, value)
+        # Return immediately to acknowledge update
+        return (None,)
 
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("response", "status", "help",)

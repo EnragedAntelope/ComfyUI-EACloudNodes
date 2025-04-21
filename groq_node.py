@@ -95,6 +95,7 @@ class GroqNode:
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
                 }),
                 "top_p": ("FLOAT", {
@@ -103,6 +104,7 @@ class GroqNode:
                     "max": 1.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
                 }),
                 "max_completion_tokens": ("INT", {
@@ -110,6 +112,7 @@ class GroqNode:
                     "min": 1,
                     "max": 32768,
                     "step": 1,
+                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Maximum number of tokens to generate (1-32768)"
                 }),
                 "frequency_penalty": ("FLOAT", {
@@ -118,6 +121,7 @@ class GroqNode:
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
                 }),
                 "presence_penalty": ("FLOAT", {
@@ -126,6 +130,7 @@ class GroqNode:
                     "max": 2.0,
                     "step": 0.01,
                     "round": 2,
+                    "display": "slider",  # Added display property for better UI interaction
                     "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
                 }),
                 "response_format": (["text", "json_object"], {
@@ -140,6 +145,7 @@ class GroqNode:
                     "default": 0,
                     "min": 0,
                     "max": 0xffffffffffffffff,
+                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Seed value for 'fixed' mode. Ignored in other modes."
                 }),
                 "max_retries": ("INT", {
@@ -147,6 +153,7 @@ class GroqNode:
                     "min": 0,
                     "max": 5,
                     "step": 1,
+                    "display": "number",  # Added display property for better UI interaction
                     "tooltip": "Maximum number of retry attempts for recoverable errors"
                 }),
             },
@@ -163,12 +170,20 @@ class GroqNode:
             }
         }
 
-    # Add update method to handle UI value changes
+    # Improved update method to fix UI interaction issues
     def update(self, **kwargs):
         # Handle updates to parameters
         for key, value in kwargs.items():
-            setattr(self, key, value)
-        return
+            if hasattr(self, key):
+                # Convert numeric values to the appropriate type
+                if key in ['temperature', 'top_p', 'frequency_penalty', 'presence_penalty']:
+                    value = float(value)
+                elif key in ['max_completion_tokens', 'seed_value', 'max_retries']:
+                    value = int(value)
+                # Update the attribute
+                setattr(self, key, value)
+        # Return immediately to acknowledge update
+        return (None,)
 
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("response", "status", "help",)
