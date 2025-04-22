@@ -479,7 +479,7 @@ For vision models:
                 except Exception as e:
                     return ("", f"Unexpected Error: {str(e)}", help_text)
 
-    # Node registration
+# Node registration (properly indented outside the method)
 NODE_CLASS_MAPPINGS = {
     "OpenrouterNode": OpenrouterNode
 }
