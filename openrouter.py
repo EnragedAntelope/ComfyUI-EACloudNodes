@@ -235,249 +235,249 @@ For vision models:
 2. Connect image to 'image_input'
 3. Describe or ask about the image in user_prompt"""
 
+        # Validate and sanitize numeric inputs
         try:
-            # Validate and sanitize numeric inputs
+            temperature = max(0.0, min(2.0, float(temperature)))
+            top_p = max(0.0, min(1.0, float(top_p)))
+            top_k = max(1, min(1000, int(top_k)))
+            max_tokens = max(1, min(32768, int(max_tokens)))
+            frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
+            presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
+            repetition_penalty = max(1.0, min(2.0, float(repetition_penalty)))
+            max_retries = max(0, min(5, int(max_retries)))
+            # Ensure seed is within JavaScript safe integer limits
+            seed_value = max(0, min(self.MAX_SAFE_INTEGER, int(seed_value)))
+        except (ValueError, TypeError) as e:
+            return "", f"Error: Invalid parameter value - {str(e)}", help_text
+            
+        # Store current parameter values
+        self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
+        self.max_tokens = max_tokens
+        self.frequency_penalty = frequency_penalty
+        self.presence_penalty = presence_penalty
+        self.repetition_penalty = repetition_penalty
+        self.seed_value = seed_value
+        self.max_retries = max_retries
+        
+        # Use manual_model if "Manual Input" is selected
+        actual_model = manual_model if model == "Manual Input" else model
+
+        # Validate model
+        if model == "Manual Input" and not manual_model.strip():
+            return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
+
+        # Add user prompt validation
+        if not user_prompt.strip():
+            return ("", "Error: User prompt is required", help_text)
+
+        # Handle seed based on mode
+        if seed_mode == "random":
+            seed = random.randint(0, self.MAX_SAFE_INTEGER)
+        elif seed_mode == "increment":
+            seed = (self.last_seed + 1) % self.MAX_SAFE_INTEGER
+        elif seed_mode == "decrement":
+            seed = (self.last_seed - 1) if self.last_seed > 0 else self.MAX_SAFE_INTEGER
+        else:  # "fixed"
+            seed = seed_value
+            
+        # Store the seed we're using
+        self.last_seed = seed
+
+        # Validate API key
+        if not api_key.strip():
+            return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
+
+        # Validate model identifier
+        if not actual_model.strip():
+            return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
+
+        # Validate base URL
+        if not base_url.strip():
+            return ("", "Error: OpenRouter API endpoint URL is required", help_text)
+
+        if not base_url.startswith(("http://", "https://")):
+            return ("", "Error: Invalid API endpoint URL format", help_text)
+
+        # Check if this is likely a vision model
+        is_vision_model = "vision" in actual_model.lower()
+        
+        # Vision model validation
+        if image_input is not None and not is_vision_model:
+            return "", f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' in its name.", help_text
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        # Initialize messages list
+        messages = []
+        
+        # Add system prompt if provided and enabled
+        if system_prompt.strip() and send_system == "yes":
+            messages.append({
+                "role": "system",
+                "content": system_prompt
+            })
+
+        # Handle image input if provided
+        if image_input is not None:
             try:
-                temperature = max(0.0, min(2.0, float(temperature)))
-                top_p = max(0.0, min(1.0, float(top_p)))
-                top_k = max(1, min(1000, int(top_k)))
-                max_tokens = max(1, min(32768, int(max_tokens)))
-                frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
-                presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
-                repetition_penalty = max(1.0, min(2.0, float(repetition_penalty)))
-                max_retries = max(0, min(5, int(max_retries)))
-                # Ensure seed is within JavaScript safe integer limits
-                seed_value = max(0, min(self.MAX_SAFE_INTEGER, int(seed_value)))
-            except (ValueError, TypeError) as e:
-                return "", f"Error: Invalid parameter value - {str(e)}", help_text
-                
-            # Store current parameter values
-            self.temperature = temperature
-            self.top_p = top_p
-            self.top_k = top_k
-            self.max_tokens = max_tokens
-            self.frequency_penalty = frequency_penalty
-            self.presence_penalty = presence_penalty
-            self.repetition_penalty = repetition_penalty
-            self.seed_value = seed_value
-            self.max_retries = max_retries
-            
-            # Use manual_model if "Manual Input" is selected
-            actual_model = manual_model if model == "Manual Input" else model
-
-            # Validate model
-            if model == "Manual Input" and not manual_model.strip():
-                return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
-
-            # Add user prompt validation
-            if not user_prompt.strip():
-                return ("", "Error: User prompt is required", help_text)
-
-            # Handle seed based on mode
-            if seed_mode == "random":
-                seed = random.randint(0, self.MAX_SAFE_INTEGER)
-            elif seed_mode == "increment":
-                seed = (self.last_seed + 1) % self.MAX_SAFE_INTEGER
-            elif seed_mode == "decrement":
-                seed = (self.last_seed - 1) if self.last_seed > 0 else self.MAX_SAFE_INTEGER
-            else:  # "fixed"
-                seed = seed_value
-                
-            # Store the seed we're using
-            self.last_seed = seed
-
-            # Validate API key
-            if not api_key.strip():
-                return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
-
-            # Validate model identifier
-            if not actual_model.strip():
-                return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
-
-            # Validate base URL
-            if not base_url.strip():
-                return ("", "Error: OpenRouter API endpoint URL is required", help_text)
-
-            if not base_url.startswith(("http://", "https://")):
-                return ("", "Error: Invalid API endpoint URL format", help_text)
-
-            # Check if this is likely a vision model
-            is_vision_model = "vision" in actual_model.lower()
-            
-            # Vision model validation
-            if image_input is not None and not is_vision_model:
-                return "", f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' in its name.", help_text
-
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-
-            # Initialize messages list
-            messages = []
-            
-            # Add system prompt if provided and enabled
-            if system_prompt.strip() and send_system == "yes":
-                messages.append({
-                    "role": "system",
-                    "content": system_prompt
-                })
-
-            # Handle image input if provided
-            if image_input is not None:
-                try:
-                    if isinstance(image_input, torch.Tensor):
-                        # Handle 4D tensors (batch dimension)
-                        if image_input.dim() == 4:
-                            image_input = image_input.squeeze(0)
-                        if image_input.dim() != 3:
-                            return ("", "Error: Image tensor must be 3D after squeezing", help_text)
-                        
-                        # Ensure correct channel order
-                        if image_input.shape[-1] in [1, 3, 4]:  # HWC format
-                            image_input = image_input.permute(2, 0, 1)  # Convert to CHW
-                        
-                        pil_image = ToPILImage()(image_input)
-                    elif isinstance(image_input, Image.Image):
-                        pil_image = image_input
-                    else:
-                        return ("", "Error: Unsupported image input type", help_text)
-
-                    # Add size validation
-                    if pil_image.size[0] * pil_image.size[1] > 2048 * 2048:
-                        return ("", "Error: Image too large. Maximum size is 2048x2048. Please resize your image.", help_text)
+                if isinstance(image_input, torch.Tensor):
+                    # Handle 4D tensors (batch dimension)
+                    if image_input.dim() == 4:
+                        image_input = image_input.squeeze(0)
+                    if image_input.dim() != 3:
+                        return ("", "Error: Image tensor must be 3D after squeezing", help_text)
                     
-                    # Convert image to base64
-                    buffered = io.BytesIO()
-                    pil_image.save(buffered, format="PNG")
-                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                    # Ensure correct channel order
+                    if image_input.shape[-1] in [1, 3, 4]:  # HWC format
+                        image_input = image_input.permute(2, 0, 1)  # Convert to CHW
                     
-                    # Add user message with image for vision models
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
-                        ]
-                    })
-                except Exception as img_err:
-                    return ("", f"Image Processing Error: {str(img_err)}", help_text)
-            else:
-                # Add text-only user message
+                    pil_image = ToPILImage()(image_input)
+                elif isinstance(image_input, Image.Image):
+                    pil_image = image_input
+                else:
+                    return ("", "Error: Unsupported image input type", help_text)
+
+                # Add size validation
+                if pil_image.size[0] * pil_image.size[1] > 2048 * 2048:
+                    return ("", "Error: Image too large. Maximum size is 2048x2048. Please resize your image.", help_text)
+                
+                # Convert image to base64
+                buffered = io.BytesIO()
+                pil_image.save(buffered, format="PNG")
+                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                
+                # Add user message with image for vision models
                 messages.append({
                     "role": "user",
-                    "content": user_prompt
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
+                    ]
                 })
+            except Exception as img_err:
+                return ("", f"Image Processing Error: {str(img_err)}", help_text)
+        else:
+            # Add text-only user message
+            messages.append({
+                "role": "user",
+                "content": user_prompt
+            })
 
-            # Prepare request body with only supported parameters
-            body = {
-                "model": actual_model,
-                "messages": messages,
-                "temperature": temperature,
-                "top_p": top_p,
-                "max_tokens": max_tokens
-            }
+        # Prepare request body with only supported parameters
+        body = {
+            "model": actual_model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_tokens
+        }
+        
+        # Only add conditional parameters if they have non-default values
+        if top_k != 50:
+            body["top_k"] = top_k
             
-            # Only add conditional parameters if they have non-default values
-            if top_k != 50:
-                body["top_k"] = top_k
+        if frequency_penalty != 0:
+            body["frequency_penalty"] = frequency_penalty
+            
+        if presence_penalty != 0:
+            body["presence_penalty"] = presence_penalty
+            
+        if repetition_penalty != 1:
+            body["repetition_penalty"] = repetition_penalty
+            
+        if seed is not None:
+            body["seed"] = seed
+
+        # Add response format if json_object is selected
+        if response_format == "json_object":
+            body["response_format"] = {"type": "json_object"}
+
+        # Parse and add additional parameters if provided
+        if additional_params and additional_params.strip():
+            try:
+                extra_params = json.loads(additional_params)
+                body.update(extra_params)
+            except json.JSONDecodeError:
+                return ("", "Error: Invalid JSON in additional parameters. Example format: {\"top_k\": 50}", help_text)
+
+        # Add detailed error handling for the API response
+        retries = 0
+        while True:
+            try:
+                response = requests.post(base_url, headers=headers, json=body, timeout=120)
                 
-            if frequency_penalty != 0:
-                body["frequency_penalty"] = frequency_penalty
+                # Define retryable status codes
+                retryable_codes = {429, 500, 502, 503, 504}
                 
-            if presence_penalty != 0:
-                body["presence_penalty"] = presence_penalty
+                if response.status_code in retryable_codes and retries < max_retries:
+                    retries += 1
+                    # Exponential backoff before retrying
+                    time.sleep(2 ** retries)
+                    continue
                 
-            if repetition_penalty != 1:
-                body["repetition_penalty"] = repetition_penalty
+                # For 400 errors, try to get detailed error information
+                if response.status_code == 400:
+                    try:
+                        error_json = response.json()
+                        error_message = error_json.get("error", {}).get("message", "Unknown error")
+                        
+                        if debug_mode == "on":
+                            return "", f"Error 400: {error_message}\nRequest body: {json.dumps(body, indent=2)}", help_text
+                        else:
+                            return "", f"Error 400: {error_message}", help_text
+                    except Exception:
+                        return "", "Error: Bad request - check model name and parameters (enable debug mode for details)", help_text
                 
-            if seed is not None:
-                body["seed"] = seed
+                if response.status_code == 401:
+                    return ("", "Error: Invalid API key or unauthorized access", help_text)
+                elif response.status_code == 429:
+                    return ("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
+                elif response.status_code == 500:
+                    return ("", f"Error: OpenRouter service error. Tried {retries} times", help_text)
+                elif response.status_code == 413:
+                    return ("", "Error: Payload too large - try reducing prompt or image size", help_text)
+                elif response.status_code != 200:
+                    return ("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
+                
+                response_json = response.json()
 
-            # Add response format if json_object is selected
-            if response_format == "json_object":
-                body["response_format"] = {"type": "json_object"}
+                # Extract useful information for status
+                model_used = response_json.get("model", "unknown")
+                tokens = response_json.get("usage", {})
+                prompt_tokens = tokens.get("prompt_tokens", 0)
+                completion_tokens = tokens.get("completion_tokens", 0)
+                
+                # Add seed to status message so user can see what was used
+                status_msg = f"Success: Used {model_used} | Seed: {seed} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
 
-            # Parse and add additional parameters if provided
-            if additional_params and additional_params.strip():
-                try:
-                    extra_params = json.loads(additional_params)
-                    body.update(extra_params)
-                except json.JSONDecodeError:
-                    return ("", "Error: Invalid JSON in additional parameters. Example format: {\"top_k\": 50}", help_text)
+                if "choices" in response_json and len(response_json["choices"]) > 0:
+                    assistant_message = response_json["choices"][0].get("message", {}).get("content", "")
+                    return (assistant_message, status_msg, help_text)
+                else:
+                    return ("", "Error: No response content from the model", help_text)
 
-            # Add detailed error handling for the API response
-            retries = 0
-            while True:
-                try:
-                    response = requests.post(base_url, headers=headers, json=body, timeout=120)
-                    
-                    # Define retryable status codes
-                    retryable_codes = {429, 500, 502, 503, 504}
-                    
-                    if response.status_code in retryable_codes and retries < max_retries:
-                        retries += 1
-                        # Exponential backoff before retrying
-                        time.sleep(2 ** retries)
-                        continue
-                    
-                    # For 400 errors, try to get detailed error information
-                    if response.status_code == 400:
-                        try:
-                            error_json = response.json()
-                            error_message = error_json.get("error", {}).get("message", "Unknown error")
-                            
-                            if debug_mode == "on":
-                                return "", f"Error 400: {error_message}\nRequest body: {json.dumps(body, indent=2)}", help_text
-                            else:
-                                return "", f"Error 400: {error_message}", help_text
-                        except Exception:
-                            return "", "Error: Bad request - check model name and parameters (enable debug mode for details)", help_text
-                    
-                    if response.status_code == 401:
-                        return ("", "Error: Invalid API key or unauthorized access", help_text)
-                    elif response.status_code == 429:
-                        return ("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
-                    elif response.status_code == 500:
-                        return ("", f"Error: OpenRouter service error. Tried {retries} times", help_text)
-                    elif response.status_code == 413:
-                        return ("", "Error: Payload too large - try reducing prompt or image size", help_text)
-                    elif response.status_code != 200:
-                        return ("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
-                    
-                    response_json = response.json()
+            except requests.exceptions.Timeout:
+                if retries < max_retries:
+                    retries += 1
+                    time.sleep(2 ** retries)
+                    continue
+                return ("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
+            except requests.exceptions.RequestException as req_err:
+                if retries < max_retries:
+                    retries += 1
+                    time.sleep(2 ** retries)
+                    continue
+                return ("", f"Request Error: {str(req_err)}. Tried {retries} times.", help_text)
+            except json.JSONDecodeError:
+                return ("", "Error: Invalid JSON response from OpenRouter", help_text)
+            except Exception as e:
+                return ("", f"Unexpected Error: {str(e)}", help_text)
 
-                    # Extract useful information for status
-                    model_used = response_json.get("model", "unknown")
-                    tokens = response_json.get("usage", {})
-                    prompt_tokens = tokens.get("prompt_tokens", 0)
-                    completion_tokens = tokens.get("completion_tokens", 0)
-                    
-                    # Add seed to status message so user can see what was used
-                    status_msg = f"Success: Used {model_used} | Seed: {seed} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
-
-                    if "choices" in response_json and len(response_json["choices"]) > 0:
-                        assistant_message = response_json["choices"][0].get("message", {}).get("content", "")
-                        return (assistant_message, status_msg, help_text)
-                    else:
-                        return ("", "Error: No response content from the model", help_text)
-
-                except requests.exceptions.Timeout:
-                    if retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)
-                        continue
-                    return ("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
-                except requests.exceptions.RequestException as req_err:
-                    if retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)
-                        continue
-                    return ("", f"Request Error: {str(req_err)}. Tried {retries} times.", help_text)
-                except json.JSONDecodeError:
-                    return ("", "Error: Invalid JSON response from OpenRouter", help_text)
-                except Exception as e:
-                    return ("", f"Unexpected Error: {str(e)}", help_text)
 
 # Node registration (properly indented outside the method)
 NODE_CLASS_MAPPINGS = {
