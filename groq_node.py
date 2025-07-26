@@ -25,24 +25,22 @@ class GroqNode:
     # Default models list from Groq documentation - updated based on current availability
     DEFAULT_MODELS = [
         # Production Models
-        "llama-3.3-70b-versatile",  # Default model
-        "llama-3.1-8b-instant",
-        "llama-guard-3-8b",
-        "llama3-70b-8192",
-        "llama3-8b-8192",
         "gemma2-9b-it",
-        "distil-whisper-large-v3-en",
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "meta-llama/llama-guard-4-12b",
         "whisper-large-v3",
         "whisper-large-v3-turbo",
         # Preview Models
-        "allam-2-7b",
         "deepseek-r1-distill-llama-70b",
-        "meta-llama/llama-4-maverick-17b-128e-instruct",  # Vision-capable
-        "meta-llama/llama-4-scout-17b-16e-instruct",      # Vision-capable
-        "mistral-saba-24b",
+        "meta-llama/llama-4-maverick-17b-128e-instruct", # Vision-capable
+        "meta-llama/llama-4-scout-17b-16e-instruct",     # Vision-capable
+        "meta-llama/llama-prompt-guard-2-22m",
+        "meta-llama/llama-prompt-guard-2-86m",
+        "moonshotai/kimi-k2-instruct",
         "playai-tts",
         "playai-tts-arabic",
-        "qwen-qwq-32b",
+        "qwen/qwen3-32b",
         "Manual Input"  # Add this option at the end
     ]
     
