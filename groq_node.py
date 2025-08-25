@@ -12,38 +12,39 @@ class GroqNode:
     A node for interacting with Groq's API.
     Supports text and vision-language models through Groq's API.
     """
-    
+
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
-    
+
     # Models that support vision capabilities
     VISION_MODELS = [
         "meta-llama/llama-4-maverick-17b-128e-instruct",
         "meta-llama/llama-4-scout-17b-16e-instruct"
     ]
-    
+
     # Default models list from Groq documentation - updated based on current availability
     DEFAULT_MODELS = [
         # Production Models
-        "gemma2-9b-it",
         "llama-3.1-8b-instant",
         "llama-3.3-70b-versatile",
         "meta-llama/llama-guard-4-12b",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
         "whisper-large-v3",
         "whisper-large-v3-turbo",
         # Preview Models
         "deepseek-r1-distill-llama-70b",
         "meta-llama/llama-4-maverick-17b-128e-instruct", # Vision-capable
-        "meta-llama/llama-4-scout-17b-16e-instruct",     # Vision-capable
+        "meta-llama/llama-4-scout-17b-16e-instruct", # Vision-capable
         "meta-llama/llama-prompt-guard-2-22m",
         "meta-llama/llama-prompt-guard-2-86m",
         "moonshotai/kimi-k2-instruct",
         "playai-tts",
         "playai-tts-arabic",
         "qwen/qwen3-32b",
-        "Manual Input"  # Add this option at the end
+        "Manual Input" # Add this option at the end
     ]
-    
+
     def __init__(self):
         # Initialize parameter values with defaults
         self.temperature = 0.7
@@ -54,7 +55,7 @@ class GroqNode:
         self.seed_value = 0
         self.last_seed = 0
         self.max_retries = 3
-    
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -137,7 +138,7 @@ class GroqNode:
                 "seed_value": ("INT", {
                     "default": 0,
                     "min": 0,
-                    "max": 9007199254740991,  # JavaScript safe integer limit
+                    "max": 9007199254740991, # JavaScript safe integer limit
                     "tooltip": "Seed value for 'fixed' mode. Ignored in other modes. (0-9007199254740991)"
                 }),
                 "max_retries": ("INT", {
@@ -190,7 +191,7 @@ class GroqNode:
         self.presence_penalty = presence_penalty
         self.seed_value = seed_value
         self.max_retries = max_retries
-        
+
         help_text = """ComfyUI-EACloudNodes - Groq Chat
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
@@ -233,7 +234,7 @@ Currently only these models support vision inputs:
                 seed_value = max(0, min(self.MAX_SAFE_INTEGER, int(seed_value)))
             except (ValueError, TypeError) as e:
                 return "", f"Error: Invalid parameter value - {str(e)}", help_text
-            
+
             # Update instance variables with sanitized values
             self.temperature = temperature
             self.top_p = top_p
@@ -261,9 +262,9 @@ Currently only these models support vision inputs:
                 seed = (self.last_seed + 1) % self.MAX_SAFE_INTEGER
             elif seed_mode == "decrement":
                 seed = (self.last_seed - 1) if self.last_seed > 0 else self.MAX_SAFE_INTEGER
-            else:  # "fixed"
+            else: # "fixed"
                 seed = seed_value
-            
+
             # Store the seed we're using
             self.last_seed = seed
 
@@ -280,7 +281,7 @@ Currently only these models support vision inputs:
 
             # Initialize messages list
             messages = []
-            
+
             # Add system prompt if provided and enabled
             if system_prompt.strip() and send_system == "yes":
                 messages.append({
@@ -297,10 +298,10 @@ Currently only these models support vision inputs:
                             image_input = image_input.squeeze(0)
                         if image_input.dim() != 3:
                             return "", "Error: Image tensor must be 3D after squeezing", help_text
-                        
+
                         if image_input.shape[-1] in [1, 3, 4]:
                             image_input = image_input.permute(2, 0, 1)
-                        
+
                         pil_image = ToPILImage()(image_input)
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
@@ -311,7 +312,7 @@ Currently only these models support vision inputs:
                     buffered = io.BytesIO()
                     pil_image.save(buffered, format="PNG")
                     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    
+
                     # Add user message with image for vision models
                     messages.append({
                         "role": "user",
@@ -337,16 +338,16 @@ Currently only these models support vision inputs:
                 "top_p": top_p,
                 "max_tokens": max_completion_tokens
             }
-            
+
             # Only add seed if it's supported (it is on most Groq models)
             if seed is not None:
                 body["seed"] = seed
-                
+
             # Only add frequency_penalty and presence_penalty if they're non-zero
             # as not all Groq models support these parameters
             if frequency_penalty != 0:
                 body["frequency_penalty"] = frequency_penalty
-                
+
             if presence_penalty != 0:
                 body["presence_penalty"] = presence_penalty
 
@@ -378,20 +379,20 @@ Currently only these models support vision inputs:
 
                     # Define retryable status codes
                     retryable_codes = {429, 500, 502, 503, 504}
-                    
+
                     if response.status_code in retryable_codes and retries < max_retries:
                         retries += 1
                         # Add exponential backoff
                         import time
-                        time.sleep(2 ** retries)  # 2, 4, 8, 16... seconds
+                        time.sleep(2 ** retries) # 2, 4, 8, 16... seconds
                         continue
-                    
+
                     # For 400 errors, try to get detailed error information
                     if response.status_code == 400:
                         try:
                             error_json = response.json()
                             error_message = error_json.get("error", {}).get("message", "Unknown error")
-                            
+
                             # If debug mode is on, provide more detailed error info
                             if debug_mode == "on":
                                 return "", f"Error 400: {error_message}\nRequest body: {json.dumps(body, indent=2)}", help_text
@@ -410,13 +411,13 @@ Currently only these models support vision inputs:
                         return "", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text
 
                     response_json = response.json()
-                    
+
                     # Extract useful information for status
                     model_used = response_json.get("model", "unknown")
                     tokens = response_json.get("usage", {})
                     prompt_tokens = tokens.get("prompt_tokens", 0)
                     completion_tokens = tokens.get("completion_tokens", 0)
-                    
+
                     # Add seed to status message so user can see what was used
                     status_msg = f"Success: Used {model_used} | Seed: {seed} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
 
@@ -434,7 +435,7 @@ Currently only these models support vision inputs:
                         time.sleep(2 ** retries)
                         continue
                     return "", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text
-                
+
                 # Break out of retry loop if we reach here
                 break
 
