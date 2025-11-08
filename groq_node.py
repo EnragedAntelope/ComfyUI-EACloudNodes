@@ -15,9 +15,17 @@ import random
 from comfy_api.latest import ComfyExtension, io
 
 
-class GroqModelEnum(io.ComboInput):
-    """Enum for Groq model selection"""
-    OPTIONS = [
+class GroqNode(io.ComfyNode):
+    """
+    A node for interacting with Groq's API.
+    Supports text and vision-language models through Groq's API.
+    """
+
+    # JavaScript safe integer limit (2^53 - 1)
+    MAX_SAFE_INTEGER = 9007199254740991
+
+    # Available Groq models
+    GROQ_MODELS = [
         # Production Models
         "llama-3.1-8b-instant",
         "llama-3.3-70b-versatile",
@@ -43,36 +51,6 @@ class GroqModelEnum(io.ComboInput):
         "Manual Input"
     ]
 
-
-class SendSystemEnum(io.ComboInput):
-    """Enum for system prompt toggle"""
-    OPTIONS = ["yes", "no"]
-
-
-class ResponseFormatEnum(io.ComboInput):
-    """Enum for response format"""
-    OPTIONS = ["text", "json_object"]
-
-
-class SeedModeEnum(io.ComboInput):
-    """Enum for seed mode"""
-    OPTIONS = ["fixed", "random", "increment", "decrement"]
-
-
-class DebugModeEnum(io.ComboInput):
-    """Enum for debug mode"""
-    OPTIONS = ["off", "on"]
-
-
-class GroqNode(io.ComfyNode):
-    """
-    A node for interacting with Groq's API.
-    Supports text and vision-language models through Groq's API.
-    """
-
-    # JavaScript safe integer limit (2^53 - 1)
-    MAX_SAFE_INTEGER = 9007199254740991
-
     # Models that support vision capabilities
     VISION_MODELS = [
         "meta-llama/llama-4-maverick-17b-128e-instruct",
@@ -96,8 +74,9 @@ class GroqNode(io.ComfyNode):
                     multiline=False,
                     tooltip="⚠️ Your Groq API key from https://console.groq.com/keys (Note: key will be visible - take care when sharing workflows)"
                 ),
-                GroqModelEnum.Input(
+                io.Combo.Input(
                     "model",
+                    options=cls.GROQ_MODELS,
                     default="llama-3.3-70b-versatile",
                     tooltip="Select a Groq model or choose 'Manual Input' to specify a custom model. Production models are stable; Preview models are for evaluation only."
                 ),
@@ -119,8 +98,9 @@ class GroqNode(io.ComfyNode):
                     multiline=True,
                     tooltip="Main prompt or question for the model. For vision tasks, describe what you want to know about the image."
                 ),
-                SendSystemEnum.Input(
+                io.Combo.Input(
                     "send_system",
+                    options=["yes", "no"],
                     default="yes",
                     tooltip="Toggle system prompt sending. Set to 'no' for vision models that don't accept system prompts (e.g., Llama-4 vision models)."
                 ),
@@ -164,13 +144,15 @@ class GroqNode(io.ComfyNode):
                     step=0.01,
                     tooltip="Penalizes tokens that have already appeared in the output. Positive values encourage topic diversity. Range: -2.0 to 2.0. Note: not all models support this parameter."
                 ),
-                ResponseFormatEnum.Input(
+                io.Combo.Input(
                     "response_format",
+                    options=["text", "json_object"],
                     default="text",
                     tooltip="Response format: 'text' for natural language, 'json_object' for structured JSON output. When using JSON, instruct the model in your prompt to output JSON."
                 ),
-                SeedModeEnum.Input(
+                io.Combo.Input(
                     "seed_mode",
+                    options=["fixed", "random", "increment", "decrement"],
                     default="random",
                     tooltip="Seed behavior control: 'fixed' uses the seed_value below, 'random' generates new seed each time, 'increment' increases by 1, 'decrement' decreases by 1."
                 ),
@@ -190,8 +172,9 @@ class GroqNode(io.ComfyNode):
                     step=1,
                     tooltip="Maximum number of automatic retry attempts for recoverable errors (rate limits, temporary server issues). 0 disables retries. Range: 0-5."
                 ),
-                DebugModeEnum.Input(
+                io.Combo.Input(
                     "debug_mode",
+                    options=["off", "on"],
                     default="off",
                     tooltip="Enable detailed error messages and request debugging information. Useful for troubleshooting API issues or parameter problems."
                 ),

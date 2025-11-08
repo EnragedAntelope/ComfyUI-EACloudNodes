@@ -16,9 +16,17 @@ import random
 from comfy_api.latest import ComfyExtension, io
 
 
-class OpenRouterModelEnum(io.ComboInput):
-    """Enum for OpenRouter model selection - Free models"""
-    OPTIONS = [
+class OpenrouterNode(io.ComfyNode):
+    """
+    A node for interacting with OpenRouter API.
+    Supports text and vision-language models through OpenRouter's API.
+    """
+
+    # JavaScript safe integer limit (2^53 - 1)
+    MAX_SAFE_INTEGER = 9007199254740991
+
+    # OpenRouter free models list
+    OPENROUTER_MODELS = [
         # Google Models
         "google/gemini-2.5-pro-exp:free",
         "google/gemini-2.0-flash-exp:free",
@@ -54,36 +62,6 @@ class OpenRouterModelEnum(io.ComboInput):
         "Manual Input"
     ]
 
-
-class SendSystemEnum(io.ComboInput):
-    """Enum for system prompt toggle"""
-    OPTIONS = ["yes", "no"]
-
-
-class ResponseFormatEnum(io.ComboInput):
-    """Enum for response format"""
-    OPTIONS = ["text", "json_object"]
-
-
-class SeedModeEnum(io.ComboInput):
-    """Enum for seed mode"""
-    OPTIONS = ["fixed", "random", "increment", "decrement"]
-
-
-class DebugModeEnum(io.ComboInput):
-    """Enum for debug mode"""
-    OPTIONS = ["off", "on"]
-
-
-class OpenrouterNode(io.ComfyNode):
-    """
-    A node for interacting with OpenRouter API.
-    Supports text and vision-language models through OpenRouter's API.
-    """
-
-    # JavaScript safe integer limit (2^53 - 1)
-    MAX_SAFE_INTEGER = 9007199254740991
-
     # Models that support vision capabilities (based on model name)
     VISION_MODELS = [
         "meta-llama/llama-3.2-11b-vision-instruct:free",
@@ -109,8 +87,9 @@ class OpenrouterNode(io.ComfyNode):
                     multiline=False,
                     tooltip="⚠️ Your OpenRouter API key from https://openrouter.ai/keys (Note: key will be visible - take care when sharing workflows)"
                 ),
-                OpenRouterModelEnum.Input(
+                io.Combo.Input(
                     "model",
+                    options=cls.OPENROUTER_MODELS,
                     default="meta-llama/llama-3.3-70b-instruct:free",
                     tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' support image inputs."
                 ),
@@ -138,8 +117,9 @@ class OpenrouterNode(io.ComfyNode):
                     multiline=True,
                     tooltip="Main prompt or question for the model. For vision models, describe what you want to know about the image. Required field."
                 ),
-                SendSystemEnum.Input(
+                io.Combo.Input(
                     "send_system",
+                    options=["yes", "no"],
                     default="yes",
                     tooltip="Toggle system prompt sending. Set to 'no' if the model doesn't support system prompts or you want to skip it."
                 ),
@@ -199,13 +179,15 @@ class OpenrouterNode(io.ComfyNode):
                     step=0.01,
                     tooltip="OpenRouter-specific repetition penalty. Values > 1.0 reduce repetition. 1.0 = off. Higher values = stronger penalty. Range: 1.0-2.0."
                 ),
-                ResponseFormatEnum.Input(
+                io.Combo.Input(
                     "response_format",
+                    options=["text", "json_object"],
                     default="text",
                     tooltip="Response format: 'text' for natural language, 'json_object' for structured JSON output. When using JSON, instruct the model in your prompt to output JSON."
                 ),
-                SeedModeEnum.Input(
+                io.Combo.Input(
                     "seed_mode",
+                    options=["fixed", "random", "increment", "decrement"],
                     default="random",
                     tooltip="Seed behavior control: 'fixed' uses the seed_value below, 'random' generates new seed each time, 'increment' increases by 1, 'decrement' decreases by 1."
                 ),
@@ -225,8 +207,9 @@ class OpenrouterNode(io.ComfyNode):
                     step=1,
                     tooltip="Maximum number of automatic retry attempts for recoverable errors (rate limits, temporary server issues). 0 disables retries. Range: 0-5."
                 ),
-                DebugModeEnum.Input(
+                io.Combo.Input(
                     "debug_mode",
+                    options=["off", "on"],
                     default="off",
                     tooltip="Enable detailed error messages and request debugging information. Useful for troubleshooting API issues or parameter problems."
                 ),
