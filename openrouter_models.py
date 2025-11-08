@@ -5,19 +5,8 @@ Query and filter available models from OpenRouter's API.
 
 import json
 import requests
-from typing import Tuple
 
 from comfy_api.latest import ComfyExtension, io
-
-
-class SortByEnum(io.ComboInput):
-    """Enum for sort field selection"""
-    OPTIONS = ["name", "pricing", "context_length"]
-
-
-class SortOrderEnum(io.ComboInput):
-    """Enum for sort order selection"""
-    OPTIONS = ["ascending", "descending"]
 
 
 class OpenRouterModels(io.ComfyNode):
@@ -50,13 +39,15 @@ class OpenRouterModels(io.ComfyNode):
                     multiline=False,
                     tooltip="Filter models by text. Examples: 'free' for free models (pricing=$0), 'gpt' for GPT models, 'free claude' for free Claude models. Leave empty to show all models. Multiple terms are AND-ed together."
                 ),
-                SortByEnum.Input(
+                io.Combo.Input(
                     "sort_by",
+                    options=["name", "pricing", "context_length"],
                     default="name",
                     tooltip="Sort models by: 'name' (alphabetically), 'pricing' (cost per token), or 'context_length' (maximum input size in tokens)."
                 ),
-                SortOrderEnum.Input(
+                io.Combo.Input(
                     "sort_order",
+                    options=["ascending", "descending"],
                     default="ascending",
                     tooltip="Sort order: 'ascending' (A-Z, low to high) or 'descending' (Z-A, high to low)."
                 )
