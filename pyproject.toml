@@ -1,7 +1,7 @@
 [project]
 name = "eacloudnodes"
-description = "A collection of ComfyUI custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments (such as MimicPC) where users may have limited system access. "
-version = "1.2.31"
+description = "ComfyUI v3 compatible nodes for cloud AI services. Groq (v3) and OpenRouter (v1) nodes with vision support, JSON output, auto-retry, and comprehensive validation. Works in all ComfyUI environments including cloud-hosted instances."
+version = "1.3.0"
 license = {file = "LICENSE"}
 dependencies = ["pillow", "requests", "torch", "torchvision"]
 
