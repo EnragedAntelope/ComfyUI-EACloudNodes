@@ -2,7 +2,7 @@
 
 A collection of [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
 
-**Note:** The Groq node has been updated to ComfyUI v3 spec for enhanced reliability and features. OpenRouter nodes currently use v1 API but will be migrated in a future update.
+**Note:** All nodes have been updated to ComfyUI v3 spec for enhanced reliability, validation, and features while maintaining backward compatibility with v1.
 
 ## Installation
 
@@ -131,47 +131,84 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - **Production Models**: Stable, reliable, meet high standards for speed/quality. Recommended for production use.
 - **Preview Models**: Experimental, intended for evaluation only. May be deprecated with short notice.
 
-### OpenRouter Chat
+### OpenRouter Chat (v3)
 
-Interact with OpenRouter's API to access various AI models for text and vision tasks.
+Interact with OpenRouter's API to access various AI models for text and vision tasks. **Now fully compatible with ComfyUI v3 spec!**
 
-#### Model Selection
-- Choose from a curated list of free models in the dropdown
-- Select "Manual Input" to use any OpenRouter-supported model
-- When using Manual Input, enter the full model identifier in the manual_model field
-- Supports both text and vision models (vision-capable models indicated in name)
+#### Features:
+- **ComfyUI v3 compatible** - Enhanced reliability and validation
+- Access to multiple AI providers through a single API
+- Comprehensive free model selection
+- Vision model support (Llama 3.2, Llama 4 variants)
+- JSON output support
+- Automatic retry mechanism with exponential backoff
+- Enhanced input validation
+- Detailed tooltips for all parameters
+- Debug mode for troubleshooting
 
-#### Available Free Models
-- Google Gemini models (various versions)
-- Meta Llama models (including vision-capable versions)
-- Microsoft Phi models
-- Mistral, Qwen, DeepSeek, and other open models
-- Full list viewable in node dropdown
+#### Available Free Models:
+**Google Models:**
+- gemini-2.5-pro-exp:free
+- gemini-2.0-flash-exp:free
+- gemini-2.0-flash-thinking-exp:free
+- gemma-2-9b-it:free
+
+**Meta Llama Models:**
+- llama-3.3-70b-instruct:free - **Default**
+- llama-3.1-70b-instruct:free
+- llama-3.1-8b-instruct:free
+- llama-3.2-90b-vision-instruct:free (Vision)
+- llama-3.2-11b-vision-instruct:free (Vision)
+- llama-4-maverick-17b-128e-instruct:free (Vision)
+- llama-4-scout-17b-16e-instruct:free (Vision)
+
+**Mistral Models:**
+- mistral-small-3.1:free
+- mistral-small-3:free
+- mistral-saba-24b:free
+- mistral-7b-instruct:free
+
+**Other Models:**
+- Microsoft Phi models (phi-3-medium, phi-3-mini)
+- Qwen models (qwen-2.5-7b, qwen-2-7b)
+- DeepSeek models (deepseek-r1 variants, deephermes-3)
+- OpenChat, Sophosympatheia models
 
 #### Parameters:
 - `api_key`: ⚠️ Your OpenRouter API key (Get from [https://openrouter.ai/keys](https://openrouter.ai/keys))
-- `model`: Select from available models or choose "Manual Input"
-- `manual_model`: Enter custom model name (only used when "Manual Input" is selected)
+- `model`: Select from free models or choose "Manual Input" for custom models
+- `manual_model`: Enter custom model identifier (only used when "Manual Input" is selected)
 - `base_url`: OpenRouter API endpoint URL (default: https://openrouter.ai/api/v1/chat/completions)
 - `system_prompt`: Optional system context setting
-- `user_prompt`: Main prompt/question for the model
+- `user_prompt`: Main prompt/question for the model (required)
+- `send_system`: Toggle system prompt on/off
 - `temperature`: Controls response randomness (0.0-2.0)
+  - Lower (0.0-0.3): More focused and deterministic
+  - Higher (0.7-2.0): More creative and varied
 - `top_p`: Nucleus sampling threshold (0.0-1.0)
 - `top_k`: Vocabulary limit (1-1000)
-- `max_tokens`: Maximum number of tokens to generate
-- `frequency_penalty`: Token frequency penalty (-2.0 to 2.0)
-- `presence_penalty`: Token presence penalty (-2.0 to 2.0)
-- `repetition_penalty`: Repetition penalty (1.0-2.0)
-- `response_format`: Choose between text or JSON object output
+- `max_tokens`: Maximum tokens to generate (1-32,768)
+- `frequency_penalty`: Reduce token frequency repetition (-2.0 to 2.0)
+- `presence_penalty`: Encourage topic diversity (-2.0 to 2.0)
+- `repetition_penalty`: OpenRouter-specific repetition penalty (1.0-2.0, 1.0=off)
+- `response_format`: Choose between "text" or "json_object" output
 - `seed_mode`: Control reproducibility (Fixed, Random, Increment, Decrement)
-- `max_retries`: Number of retry attempts for recoverable errors (0-5)
-- `image_input`: Optional image for vision-capable models
-- `additional_params`: Optional JSON object for extra model parameters
+- `seed_value`: Seed for 'fixed' mode (0-9007199254740991)
+- `max_retries`: Auto-retry attempts for recoverable errors (0-5)
+- `debug_mode`: Enable detailed error messages and request debugging
+- `image_input`: Optional image for vision models (max 2048x2048)
+- `additional_params`: Extra model parameters in JSON format
 
 #### Outputs:
 - `response`: The model's generated text or JSON response
-- `status`: Detailed information about the request, including model used and token counts
-- `help`: Static help text with usage information and repository URL
+- `status`: Detailed request information including model, seed, and token counts
+- `help`: Comprehensive help text with usage information
+
+#### Vision Model Usage:
+1. Select a vision-capable model (contains "vision" in name)
+2. Connect an image to the `image_input` parameter
+3. Describe what you want to know about the image in `user_prompt`
+4. Vision-capable models: llama-3.2-*-vision, llama-4-maverick, llama-4-scout
 
 ### OpenRouter Models Node
 Query and filter available models from OpenRouter's API.
@@ -254,18 +291,40 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 
 ## Version History
 
-### v1.3.0 (Current)
-- **Major Update**: Converted Groq node to ComfyUI v3 spec
-- Updated Groq models list to latest production and preview models
-- Added new production models: groq/compound, groq/compound-mini
-- Added new preview models: qwen/qwen3-32b, and updated model identifiers
-- Set llama-3.3-70b-versatile as default model
-- Enhanced input validation with validate_inputs method
-- Improved tooltips with detailed explanations for all parameters
-- Better error messages and debug mode support
-- Class-level seed tracking for stateless v3 architecture
-- Maintained backward compatibility with v1 API
-- Updated documentation with production vs preview model guidance
+### v2.0.0 (Current)
+- **MAJOR UPDATE**: All nodes converted to ComfyUI v3 spec
+- **Groq Node v3**:
+  - Updated models list to latest production and preview models
+  - Added new production models: groq/compound, groq/compound-mini
+  - Added new preview models: qwen/qwen3-32b
+  - Set llama-3.3-70b-versatile as default model
+  - Enhanced input validation with validate_inputs method
+  - Improved tooltips with detailed explanations for all parameters
+  - Better error messages and debug mode support
+- **OpenRouter Node v3**:
+  - Converted to v3 spec with enhanced validation
+  - Updated free models list with latest offerings
+  - Set meta-llama/llama-3.3-70b-instruct:free as default model
+  - Added comprehensive tooltips for all parameters
+  - Enhanced error handling and debug mode
+  - Better vision model detection and validation
+- **OpenRouter Models Node v3**:
+  - Converted to v3 spec
+  - Enhanced validation and error handling
+  - Improved tooltip documentation
+- **Architecture**:
+  - All nodes use stateless design with class methods
+  - Class-level seed tracking for reproducibility
+  - Maintained full backward compatibility with v1 API
+  - Combined v3 entry point for all nodes
+- **Documentation**:
+  - Comprehensive README updates for all v3 nodes
+  - Production vs preview model guidance
+  - Enhanced parameter optimization tips
+  - Detailed vision model usage instructions
+
+### v1.3.0
+- Groq node v3 conversion (initial v3 work)
 
 ### Previous Versions
 - See git history for earlier changes
@@ -273,12 +332,14 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 ## Technical Details
 
 ### ComfyUI v3 Compatibility
-The Groq node has been fully migrated to ComfyUI v3 spec:
+All nodes have been fully migrated to ComfyUI v3 spec:
 - Uses `comfy_api.latest` for enhanced reliability
 - Implements `define_schema()` with comprehensive input/output definitions
 - Stateless design with class methods (`execute()`, `validate_inputs()`)
 - Proper `comfy_entrypoint()` function for v3 registration
-- Maintains v1 compatibility through legacy NODE_CLASS_MAPPINGS
+- Combined extension class that registers all nodes
+- Maintains full v1 compatibility through legacy NODE_CLASS_MAPPINGS
+- Graceful fallback when v3 API is unavailable
 
 ### API Compatibility
 - **Groq**: OpenAI-compatible API endpoint

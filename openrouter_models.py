@@ -1,8 +1,26 @@
+"""
+OpenRouter Models Node for ComfyUI v3
+Query and filter available models from OpenRouter's API.
+"""
+
 import json
 import requests
-from typing import Tuple, List, Dict, Any
+from typing import Tuple
 
-class OpenRouterModels:
+from comfy_api.latest import ComfyExtension, io
+
+
+class SortByEnum(io.ComboInput):
+    """Enum for sort field selection"""
+    OPTIONS = ["name", "pricing", "context_length"]
+
+
+class SortOrderEnum(io.ComboInput):
+    """Enum for sort order selection"""
+    OPTIONS = ["ascending", "descending"]
+
+
+class OpenRouterModels(io.ComfyNode):
     """
     A node for retrieving and filtering available models from OpenRouter API.
     Provides functionality to:
@@ -11,39 +29,65 @@ class OpenRouterModels:
     - Sort models by various criteria
     - Format model information for easy viewing
     """
+
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "api_key": ("STRING", {
-                    "multiline": False,
-                    "default": "",
-                    "tooltip": "⚠️ Your OpenRouter API key from openrouter.ai (Note: key will be visible - take care when sharing workflows)",
-                    "password": True,
-                    "sensitive": True
-                }),
-                "filter_text": ("STRING", {
-                    "multiline": False,
-                    "default": "free",
-                    "tooltip": "Filter models by text. Examples:\n- 'free' for free models\n- 'gpt' for GPT models\n- 'free claude' for free Claude models\nLeave empty to show all models"
-                }),
-                "sort_by": (["name", "pricing", "context_length"], {
-                    "default": "name",
-                    "tooltip": "Sort models by:\n- name: alphabetically\n- pricing: cost per token\n- context_length: maximum input size"
-                }),
-                "sort_order": (["ascending", "descending"], {
-                    "default": "ascending",
-                    "tooltip": "Sort order (ascending = A-Z, low-high; descending = Z-A, high-low)"
-                })
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="OpenRouterModels",
+            display_name="OpenRouter Models",
+            category="OpenRouter",
+            description="Query and filter available models from OpenRouter's API. Filter by text, sort by name/pricing/context length, and view detailed model information.",
+            inputs=[
+                io.String.Input(
+                    "api_key",
+                    default="",
+                    multiline=False,
+                    tooltip="⚠️ Your OpenRouter API key from https://openrouter.ai/keys (Note: key will be visible - take care when sharing workflows)"
+                ),
+                io.String.Input(
+                    "filter_text",
+                    default="free",
+                    multiline=False,
+                    tooltip="Filter models by text. Examples: 'free' for free models (pricing=$0), 'gpt' for GPT models, 'free claude' for free Claude models. Leave empty to show all models. Multiple terms are AND-ed together."
+                ),
+                SortByEnum.Input(
+                    "sort_by",
+                    default="name",
+                    tooltip="Sort models by: 'name' (alphabetically), 'pricing' (cost per token), or 'context_length' (maximum input size in tokens)."
+                ),
+                SortOrderEnum.Input(
+                    "sort_order",
+                    default="ascending",
+                    tooltip="Sort order: 'ascending' (A-Z, low to high) or 'descending' (Z-A, high to low)."
+                )
+            ],
+            outputs=[
+                io.String.Output(
+                    "models",
+                    tooltip="Formatted list of models with ID, name, context length, and pricing information"
+                ),
+                io.String.Output(
+                    "status",
+                    tooltip="Status message indicating success, number of models found, or error details"
+                )
+            ]
+        )
 
-    RETURN_TYPES = ("STRING", "STRING",)
-    RETURN_NAMES = ("models", "status",)
-    FUNCTION = "get_models"
-    CATEGORY = "OpenRouter"
+    @classmethod
+    def validate_inputs(cls, api_key, **kwargs):
+        """Validate inputs before execution"""
+        if not api_key or not api_key.strip():
+            return "OpenRouter API key is required. Get one at https://openrouter.ai/keys"
+        return True
 
-    def get_models(self, api_key: str, filter_text: str, sort_by: str, sort_order: str) -> Tuple[str, str]:
+    @classmethod
+    def execute(
+        cls,
+        api_key: str,
+        filter_text: str,
+        sort_by: str,
+        sort_order: str
+    ) -> io.NodeOutput:
         """
         Retrieves, filters, and sorts OpenRouter models based on user parameters.
 
@@ -54,15 +98,11 @@ class OpenRouterModels:
             sort_order: Sort direction (ascending/descending)
 
         Returns:
-            Tuple containing:
+            NodeOutput containing:
             - Formatted string of model information
             - Status message indicating success/failure
         """
         try:
-            # Validate API key
-            if not api_key.strip():
-                return "", "🔑 Error: API key is required.\n- Get one at https://openrouter.ai/keys\n- Add it to the api_key field"
-
             # Setup API request
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -77,27 +117,51 @@ class OpenRouterModels:
                     timeout=30
                 )
             except requests.exceptions.Timeout:
-                return "", "⏱️ Error: Request timed out.\n- OpenRouter's servers may be busy\n- Try again later"
+                return io.NodeOutput(
+                    "",
+                    "⏱️ Error: Request timed out.\n- OpenRouter's servers may be busy\n- Try again later"
+                )
             except requests.exceptions.ConnectionError:
-                return "", "📶 Error: Connection failed.\n- Check your internet connection\n- OpenRouter servers may be unreachable"
+                return io.NodeOutput(
+                    "",
+                    "📶 Error: Connection failed.\n- Check your internet connection\n- OpenRouter servers may be unreachable"
+                )
             except requests.exceptions.RequestException as e:
-                return "", f"🌐 Error: Request failed.\n- {str(e)}\n- Check your network connection"
+                return io.NodeOutput(
+                    "",
+                    f"🌐 Error: Request failed.\n- {str(e)}\n- Check your network connection"
+                )
 
             # Handle API response status codes with clear user guidance
             if response.status_code == 401:
-                return "", "🔑 Error: Invalid API key or unauthorized access.\n- Check your API key at https://openrouter.ai/keys\n- Ensure it's entered correctly\n- Generate a new key if necessary"
+                return io.NodeOutput(
+                    "",
+                    "🔑 Error: Invalid API key or unauthorized access.\n- Check your API key at https://openrouter.ai/keys\n- Ensure it's entered correctly\n- Generate a new key if necessary"
+                )
             elif response.status_code == 429:
-                return "", "⚠️ Error: Rate limit exceeded.\n- You've made too many requests\n- Please wait before trying again\n- Consider upgrading your plan"
+                return io.NodeOutput(
+                    "",
+                    "⚠️ Error: Rate limit exceeded.\n- You've made too many requests\n- Please wait before trying again\n- Consider upgrading your plan"
+                )
             elif response.status_code == 500:
-                return "", "🔧 Error: OpenRouter service error.\n- This is a problem with OpenRouter's servers\n- Check status page: https://status.openrouter.ai/\n- Try again later"
+                return io.NodeOutput(
+                    "",
+                    "🔧 Error: OpenRouter service error.\n- This is a problem with OpenRouter's servers\n- Check status page: https://status.openrouter.ai/\n- Try again later"
+                )
             elif response.status_code != 200:
-                return "", f"⚠️ Error: API returned status code {response.status_code}.\n- Unexpected error from OpenRouter\n- Try again later"
+                return io.NodeOutput(
+                    "",
+                    f"⚠️ Error: API returned status code {response.status_code}.\n- Unexpected error from OpenRouter\n- Try again later"
+                )
 
             # Parse JSON response
             try:
                 models_data = response.json().get("data", [])
             except json.JSONDecodeError:
-                return "", "⚠️ Error: Invalid JSON response from API.\n- OpenRouter returned malformed data\n- Try again later"
+                return io.NodeOutput(
+                    "",
+                    "⚠️ Error: Invalid JSON response from API.\n- OpenRouter returned malformed data\n- Try again later"
+                )
 
             # Apply filters if provided
             if filter_text.strip():
@@ -110,11 +174,11 @@ class OpenRouterModels:
                         f"{model.get('name', '')} "
                         f"{model.get('description', '')}"
                     ).lower()
-                    
+
                     # Check if model is actually free (pricing = 0)
                     pricing = model.get('pricing', {})
                     is_free = (
-                        float(pricing.get('prompt', '0')) == 0 and 
+                        float(pricing.get('prompt', '0')) == 0 and
                         float(pricing.get('completion', '0')) == 0 and
                         float(pricing.get('image', '0')) == 0 and
                         float(pricing.get('request', '0')) == 0
@@ -128,7 +192,7 @@ class OpenRouterModels:
                         (term != 'free' and term in model_text)  # Otherwise check text
                         for term in filter_terms
                     )
-                    
+
                     if matches_all_terms:
                         filtered_models.append(model)
                 models_data = filtered_models
@@ -151,7 +215,10 @@ class OpenRouterModels:
                         reverse=(sort_order == "descending")
                     )
             except Exception as sort_err:
-                return "", f"⚠️ Error during sorting: {str(sort_err)}.\n- Try a different sort method\n- This may be due to inconsistent model data"
+                return io.NodeOutput(
+                    "",
+                    f"⚠️ Error during sorting: {str(sort_err)}.\n- Try a different sort method\n- This may be due to inconsistent model data"
+                )
 
             # Format output with detailed model information and clear formatting
             model_list = []
@@ -169,14 +236,36 @@ class OpenRouterModels:
 
             # Return results with status
             if not model_list:
-                return "No models found matching your criteria.", "⚠️ Warning: No models found.\n- Try broadening your filter terms\n- Or check if OpenRouter has available models"
-            
-            return ("\n".join(model_list), f"✅ Success: Found {len(models_data)} models")
+                return io.NodeOutput(
+                    "No models found matching your criteria.",
+                    "⚠️ Warning: No models found.\n- Try broadening your filter terms\n- Or check if OpenRouter has available models"
+                )
+
+            return io.NodeOutput(
+                "\n".join(model_list),
+                f"✅ Success: Found {len(models_data)} models"
+            )
 
         except Exception as e:
-            return "", f"⚠️ Unexpected Error: {str(e)}.\n- Check all input parameters\n- If the error persists, report the issue"
+            return io.NodeOutput(
+                "",
+                f"⚠️ Unexpected Error: {str(e)}.\n- Check all input parameters\n- If the error persists, report the issue"
+            )
 
-# Node registration
+
+class OpenRouterModelsExtension(ComfyExtension):
+    """Extension class for OpenRouter Models node"""
+
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        return [OpenRouterModels]
+
+
+async def comfy_entrypoint() -> ComfyExtension:
+    """Entry point for ComfyUI v3"""
+    return OpenRouterModelsExtension()
+
+
+# Legacy v1 compatibility
 NODE_CLASS_MAPPINGS = {
     "OpenRouterModels": OpenRouterModels
 }

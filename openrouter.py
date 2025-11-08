@@ -1,485 +1,623 @@
+"""
+OpenRouter Chat Node for ComfyUI v3
+Supports text and vision-language models through OpenRouter's API.
+"""
+
 import base64
 import json
 import requests
 import time
 from PIL import Image
-import io
+import io as python_io
 import torch
 from torchvision.transforms import ToPILImage
 import random
 
-class OpenrouterNode:
-    """
-    A node for interacting with OpenRouter API.
-    Supports text and vision-language models through OpenRouter's API.
-    """
-    # JavaScript safe integer limit (2^53 - 1)
-    MAX_SAFE_INTEGER = 9007199254740991
-    
-    # Default models list - updated April 2025
-    DEFAULT_MODELS = [
+from comfy_api.latest import ComfyExtension, io
+
+
+class OpenRouterModelEnum(io.ComboInput):
+    """Enum for OpenRouter model selection - Free models"""
+    OPTIONS = [
+        # Google Models
         "google/gemini-2.5-pro-exp:free",
-        "google/gemini-2.0-flash-exp:free", 
+        "google/gemini-2.0-flash-exp:free",
         "google/gemini-2.0-flash-thinking-exp:free",
         "google/gemma-2-9b-it:free",
-        "meta-llama/llama-4-scout-17b-16e-instruct:free",
-        "meta-llama/llama-4-maverick-17b-128e-instruct:free",
-        "meta-llama/llama-3.2-11b-vision-instruct:free",
-        "meta-llama/llama-3.2-90b-vision-instruct:free",
-        "meta-llama/llama-3.1-8b-instruct:free",
+        # Meta Llama Models
+        "meta-llama/llama-3.3-70b-instruct:free",
         "meta-llama/llama-3.1-70b-instruct:free",
+        "meta-llama/llama-3.1-8b-instruct:free",
+        "meta-llama/llama-3.2-90b-vision-instruct:free",
+        "meta-llama/llama-3.2-11b-vision-instruct:free",
+        "meta-llama/llama-4-maverick-17b-128e-instruct:free",
+        "meta-llama/llama-4-scout-17b-16e-instruct:free",
+        # Mistral Models
         "mistralai/mistral-small-3.1:free",
         "mistralai/mistral-small-3:free",
         "mistralai/mistral-saba-24b:free",
         "mistralai/mistral-7b-instruct:free",
+        # Microsoft Models
         "microsoft/phi-3-medium-128k-instruct:free",
         "microsoft/phi-3-mini-128k-instruct:free",
+        # Qwen Models
         "qwen/qwen-2.5-7b-instruct:free",
         "qwen/qwen-2-7b-instruct:free",
-        "deepseek/deephermes-3:free",
-        "deepseek/deepseek-r1-distill-qwen-32b:free", 
+        # DeepSeek Models
         "deepseek/deepseek-r1-distill-llama-70b:free",
+        "deepseek/deepseek-r1-distill-qwen-32b:free",
+        "deepseek/deephermes-3:free",
+        # Other Models
         "openchat/openchat-7b:free",
         "sophosympatheia/rogue-rose-103b-v0.2:free",
+        # Manual input option
         "Manual Input"
     ]
-    
-    def __init__(self):
-        # Initialize parameter values with defaults - this is needed for UI interactions
-        self.temperature = 0.7
-        self.top_p = 0.7
-        self.top_k = 50
-        self.max_tokens = 1000
-        self.frequency_penalty = 0.0
-        self.presence_penalty = 0.0
-        self.repetition_penalty = 1.1
-        self.seed_value = 0
-        self.last_seed = 0
-        self.max_retries = 3
+
+
+class SendSystemEnum(io.ComboInput):
+    """Enum for system prompt toggle"""
+    OPTIONS = ["yes", "no"]
+
+
+class ResponseFormatEnum(io.ComboInput):
+    """Enum for response format"""
+    OPTIONS = ["text", "json_object"]
+
+
+class SeedModeEnum(io.ComboInput):
+    """Enum for seed mode"""
+    OPTIONS = ["fixed", "random", "increment", "decrement"]
+
+
+class DebugModeEnum(io.ComboInput):
+    """Enum for debug mode"""
+    OPTIONS = ["off", "on"]
+
+
+class OpenrouterNode(io.ComfyNode):
+    """
+    A node for interacting with OpenRouter API.
+    Supports text and vision-language models through OpenRouter's API.
+    """
+
+    # JavaScript safe integer limit (2^53 - 1)
+    MAX_SAFE_INTEGER = 9007199254740991
+
+    # Models that support vision capabilities (based on model name)
+    VISION_MODELS = [
+        "meta-llama/llama-3.2-11b-vision-instruct:free",
+        "meta-llama/llama-3.2-90b-vision-instruct:free",
+        "meta-llama/llama-4-maverick-17b-128e-instruct:free",
+        "meta-llama/llama-4-scout-17b-16e-instruct:free"
+    ]
+
+    # Class-level storage for seed tracking (since nodes are stateless)
+    _last_seed = {}
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "api_key": ("STRING", {
-                    "multiline": False,
-                    "default": "",
-                    "tooltip": "⚠️ Your OpenRouter API key from https://openrouter.ai/keys (Note: key will be visible - take care when sharing workflows)",
-                    "password": True,
-                    "sensitive": True
-                }),
-                "model": (cls.DEFAULT_MODELS, {
-                    "default": "google/gemma-2-9b-it:free",
-                    "tooltip": "Select a model from the list or choose 'Manual Input' to specify a custom model"
-                }),
-                "manual_model": ("STRING", {
-                    "multiline": False,
-                    "default": "",
-                    "tooltip": "Enter a custom model identifier (only used when 'Manual Input' is selected above)"
-                }),
-                "base_url": ("STRING", {
-                    "multiline": False,
-                    "default": "https://openrouter.ai/api/v1/chat/completions",
-                    "tooltip": "OpenRouter API endpoint URL"
-                }),
-                "user_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "Main prompt/question for the model",
-                    "lines": 8
-                }),
-                "system_prompt": ("STRING", {
-                    "multiline": True,
-                    "default": "You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
-                    "tooltip": "Optional system prompt to set context/behavior",
-                    "lines": 4
-                }),
-                "send_system": (["yes", "no"], {
-                    "default": "yes",
-                    "tooltip": "Some models don't accept system prompts. Toggle 'no' to skip sending the system prompt."
-                }),
-                "temperature": ("FLOAT", {
-                    "default": 0.7,
-                    "min": 0.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "tooltip": "Controls randomness (0.0 = deterministic, 2.0 = very random)"
-                }),
-                "top_p": ("FLOAT", {
-                    "default": 0.7,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.01,
-                    "tooltip": "Controls diversity of word choices (0.0 = focused, 1.0 = more varied)"
-                }),
-                "top_k": ("INT", {
-                    "default": 50,
-                    "min": 1,
-                    "max": 1000,
-                    "step": 1,
-                    "tooltip": "Limits vocabulary to top K tokens"
-                }),
-                "max_tokens": ("INT", {
-                    "default": 1000,
-                    "min": 1,
-                    "max": 32768,
-                    "step": 1,
-                    "tooltip": "Maximum number of tokens to generate (1-32768)"
-                }),
-                "frequency_penalty": ("FLOAT", {
-                    "default": 0.0,
-                    "min": -2.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "tooltip": "Penalizes frequent tokens (-2.0 to 2.0)"
-                }),
-                "presence_penalty": ("FLOAT", {
-                    "default": 0.0,
-                    "min": -2.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "tooltip": "Penalizes repeated tokens (-2.0 to 2.0)"
-                }),
-                "repetition_penalty": ("FLOAT", {
-                    "default": 1.1,
-                    "min": 1.0,
-                    "max": 2.0,
-                    "step": 0.01,
-                    "tooltip": "Penalizes repetition (1.0 = off, >1.0 = more penalty)"
-                }),
-                "response_format": (["text", "json_object"], {
-                    "default": "text",
-                    "tooltip": "Format of the model's response"
-                }),
-                "seed_mode": (["fixed", "random", "increment", "decrement"], {
-                    "default": "random",
-                    "tooltip": "Control seed behavior: fixed (use seed value), random (new seed each time), increment/decrement (change by 1)"
-                }),
-                "seed_value": ("INT", {
-                    "default": 0,
-                    "min": 0,
-                    "max": 9007199254740991,
-                    "tooltip": "Seed value for 'fixed' mode. Ignored in other modes. (0-9007199254740991)"
-                }),
-                "max_retries": ("INT", {
-                    "default": 3,
-                    "min": 0,
-                    "max": 5,
-                    "step": 1,
-                    "tooltip": "Maximum number of retry attempts for recoverable errors"
-                }),
-                "debug_mode": (["off", "on"], {
-                    "default": "off",
-                    "tooltip": "Enable debug mode to get more detailed error messages"
-                })
-            },
-            "optional": {
-                "image_input": ("IMAGE", {
-                    "tooltip": "Optional image input for vision-capable models"
-                }),
-                "additional_params": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "tooltip": "Additional OpenRouter parameters in JSON format",
-                    "lines": 6
-                })
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="OpenrouterNode",
+            display_name="OpenRouter Chat",
+            category="OpenRouter",
+            description="Access OpenRouter's multi-provider API for various AI models. Supports free models, vision analysis, JSON output, and comprehensive error handling.",
+            inputs=[
+                io.String.Input(
+                    "api_key",
+                    default="",
+                    multiline=False,
+                    tooltip="⚠️ Your OpenRouter API key from https://openrouter.ai/keys (Note: key will be visible - take care when sharing workflows)"
+                ),
+                OpenRouterModelEnum.Input(
+                    "model",
+                    default="meta-llama/llama-3.3-70b-instruct:free",
+                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' support image inputs."
+                ),
+                io.String.Input(
+                    "manual_model",
+                    default="",
+                    multiline=False,
+                    tooltip="Enter a custom model identifier (only used when 'Manual Input' is selected). Format: provider/model-name[:free]. Leave empty if using dropdown."
+                ),
+                io.String.Input(
+                    "base_url",
+                    default="https://openrouter.ai/api/v1/chat/completions",
+                    multiline=False,
+                    tooltip="OpenRouter API endpoint URL. Leave as default unless using a proxy or alternate endpoint."
+                ),
+                io.String.Input(
+                    "system_prompt",
+                    default="You are a helpful AI assistant. Please provide clear, accurate, and ethical responses.",
+                    multiline=True,
+                    tooltip="Optional system prompt to set the AI's behavior and context. Defines the assistant's role, personality, and guidelines."
+                ),
+                io.String.Input(
+                    "user_prompt",
+                    default="",
+                    multiline=True,
+                    tooltip="Main prompt or question for the model. For vision models, describe what you want to know about the image. Required field."
+                ),
+                SendSystemEnum.Input(
+                    "send_system",
+                    default="yes",
+                    tooltip="Toggle system prompt sending. Set to 'no' if the model doesn't support system prompts or you want to skip it."
+                ),
+                io.Float.Input(
+                    "temperature",
+                    default=0.7,
+                    min=0.0,
+                    max=2.0,
+                    step=0.01,
+                    tooltip="Controls response randomness and creativity. Lower values (0.0-0.3) = more focused and deterministic. Higher values (0.7-2.0) = more creative and varied."
+                ),
+                io.Float.Input(
+                    "top_p",
+                    default=0.7,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Nucleus sampling threshold. Controls diversity of word choices. Lower values (0.0-0.3) = more focused vocabulary. Higher values (0.7-1.0) = more diverse word selection."
+                ),
+                io.Int.Input(
+                    "top_k",
+                    default=50,
+                    min=1,
+                    max=1000,
+                    step=1,
+                    tooltip="Limits vocabulary to top K most likely tokens. Lower values = more focused. Higher values = more diverse. 50 is a balanced default. Range: 1-1000."
+                ),
+                io.Int.Input(
+                    "max_tokens",
+                    default=1000,
+                    min=1,
+                    max=32768,
+                    step=1,
+                    tooltip="Maximum number of tokens to generate in the response. Note: actual limit varies by model. Higher values allow longer responses. Range: 1-32,768."
+                ),
+                io.Float.Input(
+                    "frequency_penalty",
+                    default=0.0,
+                    min=-2.0,
+                    max=2.0,
+                    step=0.01,
+                    tooltip="Penalizes tokens based on their frequency in the output. Positive values reduce word repetition. Range: -2.0 to 2.0. 0.0 = no penalty."
+                ),
+                io.Float.Input(
+                    "presence_penalty",
+                    default=0.0,
+                    min=-2.0,
+                    max=2.0,
+                    step=0.01,
+                    tooltip="Penalizes tokens that have already appeared in the output. Positive values encourage topic diversity. Range: -2.0 to 2.0. 0.0 = no penalty."
+                ),
+                io.Float.Input(
+                    "repetition_penalty",
+                    default=1.1,
+                    min=1.0,
+                    max=2.0,
+                    step=0.01,
+                    tooltip="OpenRouter-specific repetition penalty. Values > 1.0 reduce repetition. 1.0 = off. Higher values = stronger penalty. Range: 1.0-2.0."
+                ),
+                ResponseFormatEnum.Input(
+                    "response_format",
+                    default="text",
+                    tooltip="Response format: 'text' for natural language, 'json_object' for structured JSON output. When using JSON, instruct the model in your prompt to output JSON."
+                ),
+                SeedModeEnum.Input(
+                    "seed_mode",
+                    default="random",
+                    tooltip="Seed behavior control: 'fixed' uses the seed_value below, 'random' generates new seed each time, 'increment' increases by 1, 'decrement' decreases by 1."
+                ),
+                io.Int.Input(
+                    "seed_value",
+                    default=0,
+                    min=0,
+                    max=9007199254740991,
+                    step=1,
+                    tooltip="Seed value for reproducibility when seed_mode is 'fixed'. Use same seed + parameters for similar outputs. Valid range: 0-9007199254740991 (JavaScript safe integer limit)."
+                ),
+                io.Int.Input(
+                    "max_retries",
+                    default=3,
+                    min=0,
+                    max=5,
+                    step=1,
+                    tooltip="Maximum number of automatic retry attempts for recoverable errors (rate limits, temporary server issues). 0 disables retries. Range: 0-5."
+                ),
+                DebugModeEnum.Input(
+                    "debug_mode",
+                    default="off",
+                    tooltip="Enable detailed error messages and request debugging information. Useful for troubleshooting API issues or parameter problems."
+                ),
+                io.Image.Input(
+                    "image_input",
+                    optional=True,
+                    tooltip="Optional image input for vision-capable models. Supported models: llama-3.2-*-vision, llama-4-maverick, llama-4-scout. Maximum size: 2048x2048."
+                ),
+                io.String.Input(
+                    "additional_params",
+                    default="",
+                    multiline=True,
+                    optional=True,
+                    tooltip="Additional OpenRouter API parameters in JSON format. Example: {\"min_p\": 0.1, \"top_a\": 0.5}. Use for advanced model-specific parameters not exposed in the UI."
+                )
+            ],
+            outputs=[
+                io.String.Output(
+                    "response",
+                    tooltip="The model's generated text or JSON response"
+                ),
+                io.String.Output(
+                    "status",
+                    tooltip="Detailed information about the request including model used, seed value, and token counts"
+                ),
+                io.String.Output(
+                    "help",
+                    tooltip="Static help text with usage information and repository URL"
+                )
+            ],
+            is_output_node=True
+        )
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING")
-    RETURN_NAMES = ("response", "status", "help")
-    FUNCTION = "chat_completion"
-    CATEGORY = "OpenRouter"
-    OUTPUT_NODE = True
+    @classmethod
+    def validate_inputs(cls, api_key, model, manual_model, user_prompt, base_url, **kwargs):
+        """Validate inputs before execution"""
+        # Validate API key
+        if not api_key or not api_key.strip():
+            return "OpenRouter API key is required. Get one at https://openrouter.ai/keys"
 
-    def chat_completion(
-        self, api_key: str, model: str, manual_model: str,
+        # Validate model selection
+        actual_model = manual_model if model == "Manual Input" else model
+        if model == "Manual Input" and (not manual_model or not manual_model.strip()):
+            return "Manual model identifier is required when 'Manual Input' is selected"
+
+        # Validate user prompt
+        if not user_prompt or not user_prompt.strip():
+            return "User prompt is required"
+
+        # Validate base URL
+        if not base_url or not base_url.strip():
+            return "OpenRouter API endpoint URL is required"
+
+        if not base_url.startswith(("http://", "https://")):
+            return "Invalid API endpoint URL format (must start with http:// or https://)"
+
+        # Validate additional_params if provided
+        additional_params = kwargs.get("additional_params", "")
+        if additional_params and additional_params.strip():
+            try:
+                json.loads(additional_params)
+            except json.JSONDecodeError:
+                return "Invalid JSON in additional parameters. Example format: {\"top_a\": 0.5}"
+
+        return True
+
+    @classmethod
+    def execute(
+        cls,
+        api_key: str,
+        model: str,
+        manual_model: str,
         base_url: str,
-        user_prompt: str, system_prompt: str, send_system: str,
-        temperature: float, top_p: float, top_k: int,
-        max_tokens: int, frequency_penalty: float,
-        presence_penalty: float, repetition_penalty: float,
-        response_format: str, seed_mode: str, seed_value: int,
-        max_retries: int, debug_mode: str, image_input=None, additional_params=None
-    ) -> tuple[str, str, str]:
-        help_text = """ComfyUI-EACloudNodes - OpenRouter Chat
+        system_prompt: str,
+        user_prompt: str,
+        send_system: str,
+        temperature: float,
+        top_p: float,
+        top_k: int,
+        max_tokens: int,
+        frequency_penalty: float,
+        presence_penalty: float,
+        repetition_penalty: float,
+        response_format: str,
+        seed_mode: str,
+        seed_value: int,
+        max_retries: int,
+        debug_mode: str,
+        image_input=None,
+        additional_params: str = ""
+    ) -> io.NodeOutput:
+        """
+        Execute chat completion request to OpenRouter API
+        """
+
+        help_text = """ComfyUI-EACloudNodes - OpenRouter Chat (v3)
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from https://openrouter.ai/keys
-- Model: Choose from dropdown or use Manual Input
-- Manual Model: Custom model ID (when Manual Input selected)
+- Model: Choose from free models or use Manual Input
+  * Default: meta-llama/llama-3.3-70b-instruct:free
+  * Vision: llama-3.2-*-vision, llama-4-maverick/scout
+  * Google: gemini-2.5-pro, gemini-2.0-flash variants
+  * Other: Mistral, Qwen, DeepSeek, Phi, and more
+- Manual Model: Custom model ID (provider/model-name[:free])
 - Base URL: API endpoint (usually leave as default)
-- System Prompt: Set behavior/context 
+- System Prompt: Set AI behavior/context
+- User Prompt: Main input for the model (required)
 - Send System: Toggle system prompt on/off
-- User Prompt: Main input for the model
 - Temperature: 0.0 (focused) to 2.0 (creative)
-- Top-p: Nucleus sampling threshold
-- Top-k: Vocabulary limit
-- Max Tokens: Limit response length
-- Frequency Penalty: Control token frequency
-- Presence Penalty: Control token presence
-- Repetition Penalty: Control repetition
-- Response Format: Text or JSON output
-- Seed Mode: Fixed/random/increment/decrement
+- Top-p: Nucleus sampling threshold (0.0-1.0)
+- Top-k: Vocabulary limit (1-1000)
+- Max Tokens: Response length limit (1-32,768)
+- Frequency Penalty: Reduce token frequency (-2.0 to 2.0)
+- Presence Penalty: Encourage topic diversity (-2.0 to 2.0)
+- Repetition Penalty: Reduce repetition (1.0-2.0, 1.0=off)
+- Response Format: Text or JSON object output
+- Seed Mode: Fixed/random/increment/decrement for reproducibility
 - Seed Value: Seed for 'fixed' mode (0-9007199254740991)
 - Max Retries: Auto-retry on errors (0-5)
-- Debug Mode: Enable to get detailed error messages
+- Debug Mode: Enable for detailed error messages
 
 Optional:
-- Image Input: For vision-capable models
-- Additional Params: Extra model parameters
+- Image Input: For vision-capable models only
+  * llama-3.2-11b-vision-instruct:free
+  * llama-3.2-90b-vision-instruct:free
+  * llama-4-maverick-17b-128e-instruct:free
+  * llama-4-scout-17b-16e-instruct:free
+  * Max size: 2048x2048
+- Additional Params: Extra model parameters in JSON
 
-For vision models:
-1. Select a vision-capable model (containing "vision" in name)
-2. Connect image to 'image_input'
-3. Describe or ask about the image in user_prompt"""
+Vision Models:
+1. Select a vision-capable model (contains 'vision' in name)
+2. Connect an image to image_input
+3. Describe what you want to know about the image in user_prompt
 
-        # Validate and sanitize numeric inputs
+Free Models:
+All models in the dropdown include ':free' suffix for free-tier access.
+OpenRouter provides free access to many models with rate limits.
+
+For full documentation and examples, visit:
+https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
+
         try:
-            temperature = max(0.0, min(2.0, float(temperature)))
-            top_p = max(0.0, min(1.0, float(top_p)))
-            top_k = max(1, min(1000, int(top_k)))
-            max_tokens = max(1, min(32768, int(max_tokens)))
-            frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
-            presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
-            repetition_penalty = max(1.0, min(2.0, float(repetition_penalty)))
-            max_retries = max(0, min(5, int(max_retries)))
-            # Ensure seed is within JavaScript safe integer limits
-            seed_value = max(0, min(self.MAX_SAFE_INTEGER, int(seed_value)))
-        except (ValueError, TypeError) as e:
-            return "", f"Error: Invalid parameter value - {str(e)}", help_text
-            
-        # Store current parameter values
-        self.temperature = temperature
-        self.top_p = top_p
-        self.top_k = top_k
-        self.max_tokens = max_tokens
-        self.frequency_penalty = frequency_penalty
-        self.presence_penalty = presence_penalty
-        self.repetition_penalty = repetition_penalty
-        self.seed_value = seed_value
-        self.max_retries = max_retries
-        
-        # Use manual_model if "Manual Input" is selected
-        actual_model = manual_model if model == "Manual Input" else model
-
-        # Validate model
-        if model == "Manual Input" and not manual_model.strip():
-            return "", "Error: Manual model identifier is required when 'Manual Input' is selected", help_text
-
-        # Add user prompt validation
-        if not user_prompt.strip():
-            return ("", "Error: User prompt is required", help_text)
-
-        # Handle seed based on mode
-        if seed_mode == "random":
-            seed = random.randint(0, self.MAX_SAFE_INTEGER)
-        elif seed_mode == "increment":
-            seed = (self.last_seed + 1) % self.MAX_SAFE_INTEGER
-        elif seed_mode == "decrement":
-            seed = (self.last_seed - 1) if self.last_seed > 0 else self.MAX_SAFE_INTEGER
-        else:  # "fixed"
-            seed = seed_value
-            
-        # Store the seed we're using
-        self.last_seed = seed
-
-        # Validate API key
-        if not api_key.strip():
-            return ("", "Error: OpenRouter API key is required. Get one at https://openrouter.ai/keys", help_text)
-
-        # Validate model identifier
-        if not actual_model.strip():
-            return ("", "Error: Model identifier required (e.g., 'anthropic/claude-3-opus')", help_text)
-
-        # Validate base URL
-        if not base_url.strip():
-            return ("", "Error: OpenRouter API endpoint URL is required", help_text)
-
-        if not base_url.startswith(("http://", "https://")):
-            return ("", "Error: Invalid API endpoint URL format", help_text)
-
-        # Check if this is likely a vision model
-        is_vision_model = "vision" in actual_model.lower()
-        
-        # Vision model validation
-        if image_input is not None and not is_vision_model:
-            return "", f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' in its name.", help_text
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-
-        # Initialize messages list
-        messages = []
-        
-        # Add system prompt if provided and enabled
-        if system_prompt.strip() and send_system == "yes":
-            messages.append({
-                "role": "system",
-                "content": system_prompt
-            })
-
-        # Handle image input if provided
-        if image_input is not None:
+            # Sanitize and validate numeric inputs
             try:
-                if isinstance(image_input, torch.Tensor):
-                    # Handle 4D tensors (batch dimension)
-                    if image_input.dim() == 4:
-                        image_input = image_input.squeeze(0)
-                    if image_input.dim() != 3:
-                        return ("", "Error: Image tensor must be 3D after squeezing", help_text)
-                    
-                    # Ensure correct channel order
-                    if image_input.shape[-1] in [1, 3, 4]:  # HWC format
-                        image_input = image_input.permute(2, 0, 1)  # Convert to CHW
-                    
-                    pil_image = ToPILImage()(image_input)
-                elif isinstance(image_input, Image.Image):
-                    pil_image = image_input
-                else:
-                    return ("", "Error: Unsupported image input type", help_text)
+                temperature = max(0.0, min(2.0, float(temperature)))
+                top_p = max(0.0, min(1.0, float(top_p)))
+                top_k = max(1, min(1000, int(top_k)))
+                max_tokens = max(1, min(32768, int(max_tokens)))
+                frequency_penalty = max(-2.0, min(2.0, float(frequency_penalty)))
+                presence_penalty = max(-2.0, min(2.0, float(presence_penalty)))
+                repetition_penalty = max(1.0, min(2.0, float(repetition_penalty)))
+                max_retries = max(0, min(5, int(max_retries)))
+                seed_value = max(0, min(cls.MAX_SAFE_INTEGER, int(seed_value)))
+            except (ValueError, TypeError) as e:
+                return io.NodeOutput("", f"Error: Invalid parameter value - {str(e)}", help_text)
 
-                # Add size validation
-                if pil_image.size[0] * pil_image.size[1] > 2048 * 2048:
-                    return ("", "Error: Image too large. Maximum size is 2048x2048. Please resize your image.", help_text)
-                
-                # Convert image to base64
-                buffered = io.BytesIO()
-                pil_image.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                
-                # Add user message with image for vision models
+            # Use manual_model if "Manual Input" is selected
+            actual_model = manual_model.strip() if model == "Manual Input" else model
+
+            # Handle seed based on mode
+            node_id = id(cls)  # Use class id as a simple identifier
+            if seed_mode == "random":
+                seed = random.randint(0, cls.MAX_SAFE_INTEGER)
+            elif seed_mode == "increment":
+                last_seed = cls._last_seed.get(node_id, 0)
+                seed = (last_seed + 1) % cls.MAX_SAFE_INTEGER
+            elif seed_mode == "decrement":
+                last_seed = cls._last_seed.get(node_id, 0)
+                seed = (last_seed - 1) if last_seed > 0 else cls.MAX_SAFE_INTEGER
+            else:  # "fixed"
+                seed = seed_value
+
+            # Store the seed we're using
+            cls._last_seed[node_id] = seed
+
+            # Check if model supports vision capabilities
+            is_vision_model = "vision" in actual_model.lower() or actual_model in cls.VISION_MODELS
+
+            # Vision model validation
+            if image_input is not None and not is_vision_model:
+                return io.NodeOutput(
+                    "",
+                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' in its name. Vision-capable models: {', '.join(cls.VISION_MODELS)}",
+                    help_text
+                )
+
+            # Prepare headers
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # Initialize messages list
+            messages = []
+
+            # Add system prompt if provided and enabled
+            if system_prompt and system_prompt.strip() and send_system == "yes":
+                messages.append({
+                    "role": "system",
+                    "content": system_prompt
+                })
+
+            # Handle image input if provided
+            if image_input is not None:
+                try:
+                    # Process image for vision models
+                    if isinstance(image_input, torch.Tensor):
+                        if image_input.dim() == 4:
+                            image_input = image_input.squeeze(0)
+                        if image_input.dim() != 3:
+                            return io.NodeOutput("", "Error: Image tensor must be 3D after squeezing", help_text)
+
+                        if image_input.shape[-1] in [1, 3, 4]:
+                            image_input = image_input.permute(2, 0, 1)
+
+                        pil_image = ToPILImage()(image_input)
+                    elif isinstance(image_input, Image.Image):
+                        pil_image = image_input
+                    else:
+                        return io.NodeOutput("", "Error: Unsupported image input type", help_text)
+
+                    # Add size validation
+                    if pil_image.size[0] * pil_image.size[1] > 2048 * 2048:
+                        return io.NodeOutput(
+                            "",
+                            "Error: Image too large. Maximum size is 2048x2048. Please resize your image.",
+                            help_text
+                        )
+
+                    # Convert image to base64
+                    buffered = python_io.BytesIO()
+                    pil_image.save(buffered, format="PNG")
+                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+                    # Add user message with image for vision models
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
+                        ]
+                    })
+                except Exception as img_err:
+                    return io.NodeOutput("", f"Image Processing Error: {str(img_err)}", help_text)
+            else:
+                # Add text-only user message
                 messages.append({
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
-                    ]
+                    "content": user_prompt
                 })
-            except Exception as img_err:
-                return ("", f"Image Processing Error: {str(img_err)}", help_text)
-        else:
-            # Add text-only user message
-            messages.append({
-                "role": "user",
-                "content": user_prompt
-            })
 
-        # Prepare request body with only supported parameters
-        body = {
-            "model": actual_model,
-            "messages": messages,
-            "temperature": temperature,
-            "top_p": top_p,
-            "max_tokens": max_tokens
-        }
-        
-        # Only add conditional parameters if they have non-default values
-        if top_k != 50:
-            body["top_k"] = top_k
-            
-        if frequency_penalty != 0:
-            body["frequency_penalty"] = frequency_penalty
-            
-        if presence_penalty != 0:
-            body["presence_penalty"] = presence_penalty
-            
-        if repetition_penalty != 1:
-            body["repetition_penalty"] = repetition_penalty
-            
-        if seed is not None:
-            body["seed"] = seed
+            # Prepare request body
+            body = {
+                "model": actual_model,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_tokens
+            }
 
-        # Add response format if json_object is selected
-        if response_format == "json_object":
-            body["response_format"] = {"type": "json_object"}
+            # Add optional parameters
+            if top_k != 50:
+                body["top_k"] = top_k
 
-        # Parse and add additional parameters if provided
-        if additional_params and additional_params.strip():
-            try:
-                extra_params = json.loads(additional_params)
-                body.update(extra_params)
-            except json.JSONDecodeError:
-                return ("", "Error: Invalid JSON in additional parameters. Example format: {\"top_k\": 50}", help_text)
+            if frequency_penalty != 0:
+                body["frequency_penalty"] = frequency_penalty
 
-        # Add detailed error handling for the API response
-        retries = 0
-        while True:
-            try:
-                response = requests.post(base_url, headers=headers, json=body, timeout=120)
-                
-                # Define retryable status codes
-                retryable_codes = {429, 500, 502, 503, 504}
-                
-                if response.status_code in retryable_codes and retries < max_retries:
-                    retries += 1
-                    # Exponential backoff before retrying
-                    time.sleep(2 ** retries)
-                    continue
-                
-                # For 400 errors, try to get detailed error information
-                if response.status_code == 400:
-                    try:
-                        error_json = response.json()
-                        error_message = error_json.get("error", {}).get("message", "Unknown error")
-                        
-                        if debug_mode == "on":
-                            return "", f"Error 400: {error_message}\nRequest body: {json.dumps(body, indent=2)}", help_text
-                        else:
-                            return "", f"Error 400: {error_message}", help_text
-                    except Exception:
-                        return "", "Error: Bad request - check model name and parameters (enable debug mode for details)", help_text
-                
-                if response.status_code == 401:
-                    return ("", "Error: Invalid API key or unauthorized access", help_text)
-                elif response.status_code == 429:
-                    return ("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
-                elif response.status_code == 500:
-                    return ("", f"Error: OpenRouter service error. Tried {retries} times", help_text)
-                elif response.status_code == 413:
-                    return ("", "Error: Payload too large - try reducing prompt or image size", help_text)
-                elif response.status_code != 200:
-                    return ("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
-                
-                response_json = response.json()
+            if presence_penalty != 0:
+                body["presence_penalty"] = presence_penalty
 
-                # Extract useful information for status
-                model_used = response_json.get("model", "unknown")
-                tokens = response_json.get("usage", {})
-                prompt_tokens = tokens.get("prompt_tokens", 0)
-                completion_tokens = tokens.get("completion_tokens", 0)
-                
-                # Add seed to status message so user can see what was used
-                status_msg = f"Success: Used {model_used} | Seed: {seed} | Tokens: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens}"
+            if repetition_penalty != 1.0:
+                body["repetition_penalty"] = repetition_penalty
 
-                if "choices" in response_json and len(response_json["choices"]) > 0:
-                    assistant_message = response_json["choices"][0].get("message", {}).get("content", "")
-                    return (assistant_message, status_msg, help_text)
-                else:
-                    return ("", "Error: No response content from the model", help_text)
+            if seed is not None:
+                body["seed"] = seed
 
-            except requests.exceptions.Timeout:
-                if retries < max_retries:
-                    retries += 1
-                    time.sleep(2 ** retries)
-                    continue
-                return ("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
-            except requests.exceptions.RequestException as req_err:
-                if retries < max_retries:
-                    retries += 1
-                    time.sleep(2 ** retries)
-                    continue
-                return ("", f"Request Error: {str(req_err)}. Tried {retries} times.", help_text)
-            except json.JSONDecodeError:
-                return ("", "Error: Invalid JSON response from OpenRouter", help_text)
-            except Exception as e:
-                return ("", f"Unexpected Error: {str(e)}", help_text)
+            # Add response format if json_object is selected
+            if response_format == "json_object":
+                body["response_format"] = {"type": "json_object"}
+
+            # Parse and add additional parameters if provided
+            if additional_params and additional_params.strip():
+                try:
+                    extra_params = json.loads(additional_params)
+                    body.update(extra_params)
+                except json.JSONDecodeError:
+                    return io.NodeOutput("", "Error: Invalid JSON in additional parameters. Example format: {\"top_a\": 0.5}", help_text)
+
+            # Make API request with retry logic
+            retries = 0
+            while True:
+                try:
+                    response = requests.post(base_url, headers=headers, json=body, timeout=120)
+
+                    # Define retryable status codes
+                    retryable_codes = {429, 500, 502, 503, 504}
+
+                    if response.status_code in retryable_codes and retries < max_retries:
+                        retries += 1
+                        time.sleep(2 ** retries)  # Exponential backoff: 2, 4, 8, 16... seconds
+                        continue
+
+                    # Handle 400 errors with detailed information
+                    if response.status_code == 400:
+                        try:
+                            error_json = response.json()
+                            error_message = error_json.get("error", {}).get("message", "Unknown error")
+
+                            if debug_mode == "on":
+                                return io.NodeOutput(
+                                    "",
+                                    f"Error 400: {error_message}\n\nRequest body:\n{json.dumps(body, indent=2)}",
+                                    help_text
+                                )
+                            else:
+                                return io.NodeOutput("", f"Error 400: {error_message}", help_text)
+                        except Exception:
+                            return io.NodeOutput(
+                                "",
+                                "Error: Bad request - check model name and parameters (enable debug mode for details)",
+                                help_text
+                            )
+
+                    # Handle other response codes
+                    if response.status_code == 401:
+                        return io.NodeOutput("", "Error: Invalid API key or unauthorized access", help_text)
+                    elif response.status_code == 413:
+                        return io.NodeOutput("", "Error: Payload too large - try reducing prompt or image size", help_text)
+                    elif response.status_code == 429:
+                        return io.NodeOutput("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
+                    elif response.status_code in {500, 502, 503, 504}:
+                        return io.NodeOutput("", f"Error: OpenRouter service error (status {response.status_code}). Tried {retries} times", help_text)
+                    elif response.status_code != 200:
+                        return io.NodeOutput("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
+
+                    response_json = response.json()
+
+                    # Extract information for status
+                    model_used = response_json.get("model", "unknown")
+                    tokens = response_json.get("usage", {})
+                    prompt_tokens = tokens.get("prompt_tokens", 0)
+                    completion_tokens = tokens.get("completion_tokens", 0)
+                    total_tokens = prompt_tokens + completion_tokens
+
+                    status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
+
+                    if "choices" in response_json and len(response_json["choices"]) > 0:
+                        content = response_json["choices"][0].get("message", {}).get("content", "")
+                        return io.NodeOutput(content, status_msg, help_text)
+                    else:
+                        return io.NodeOutput("", "Error: No response content from the model", help_text)
+
+                except requests.exceptions.Timeout:
+                    if retries < max_retries:
+                        retries += 1
+                        time.sleep(2 ** retries)
+                        continue
+                    return io.NodeOutput("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
+                except requests.exceptions.RequestException as req_err:
+                    # Retry network-related errors
+                    if retries < max_retries:
+                        retries += 1
+                        time.sleep(2 ** retries)
+                        continue
+                    return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
+                except json.JSONDecodeError:
+                    return io.NodeOutput("", "Error: Invalid JSON response from OpenRouter", help_text)
+
+                # Break out of retry loop
+                break
+
+        except Exception as e:
+            return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)
 
 
-# Node registration (properly indented outside the method)
+class OpenRouterExtension(ComfyExtension):
+    """Extension class for OpenRouter nodes"""
+
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        return [OpenrouterNode]
+
+
+async def comfy_entrypoint() -> ComfyExtension:
+    """Entry point for ComfyUI v3"""
+    return OpenRouterExtension()
+
+
+# Legacy v1 compatibility (for nodes that still use old API)
 NODE_CLASS_MAPPINGS = {
     "OpenrouterNode": OpenrouterNode
 }
