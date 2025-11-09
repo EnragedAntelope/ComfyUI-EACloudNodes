@@ -1,7 +1,7 @@
 [project]
 name = "eacloudnodes"
 description = "ComfyUI v3 compatible nodes for cloud AI services. All nodes (Groq, OpenRouter, OpenRouter Models) fully migrated to v3 with enhanced validation, tooltips, and error handling. Vision support, JSON output, auto-retry. Works in all ComfyUI environments."
-version = "2.0.0"
+version = "2.0.01"
 license = {file = "LICENSE"}
 dependencies = ["pillow", "requests", "torch", "torchvision"]
 
