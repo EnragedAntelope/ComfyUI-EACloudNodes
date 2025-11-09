@@ -147,32 +147,71 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - Debug mode for troubleshooting
 
 #### Available Free Models:
-**Google Models:**
-- gemini-2.5-pro-exp:free
-- gemini-2.0-flash-exp:free
-- gemini-2.0-flash-thinking-exp:free
-- gemma-2-9b-it:free
-
 **Meta Llama Models:**
-- llama-3.3-70b-instruct:free - **Default**
-- llama-3.1-70b-instruct:free
-- llama-3.1-8b-instruct:free
-- llama-3.2-90b-vision-instruct:free (Vision)
-- llama-3.2-11b-vision-instruct:free (Vision)
-- llama-4-maverick-17b-128e-instruct:free (Vision)
-- llama-4-scout-17b-16e-instruct:free (Vision)
+- meta-llama/llama-3.3-70b-instruct:free - **Default**
+- meta-llama/llama-3.3-8b-instruct:free
+- meta-llama/llama-3.2-3b-instruct:free
+- meta-llama/llama-3.2-1b-instruct:free
+- meta-llama/llama-3.1-8b-instruct:free
+- meta-llama/llama-4-maverick:free (**Vision**)
+- meta-llama/llama-4-scout:free (**Vision**)
+- meta-llama/llama-3.2-90b-vision-instruct:free (**Vision**)
+
+**Google Models:**
+- google/gemini-2.0-flash-exp:free
+- google/gemma-3-27b-it:free
+- google/gemma-2-27b-it:free
+- google/gemma-2-9b-it:free
+- google/gemma-2-2b-it:free
+- google/gemini-flash-1.5-8b-exp:free
 
 **Mistral Models:**
-- mistral-small-3.1:free
-- mistral-small-3:free
-- mistral-saba-24b:free
-- mistral-7b-instruct:free
+- mistralai/mistral-small-3.1:free
+- mistralai/ministral-8b:free
+- mistralai/ministral-3b:free
+- mistralai/mistral-saba-24b:free
+- mistralai/mistral-nemo:free
+- mistralai/mistral-7b-instruct:free
+
+**Qwen Models:**
+- qwen/qwen3-72b:free
+- qwen/qwen-2.5-72b-instruct:free
+- qwen/qwen-2.5-coder-32b-instruct:free
+- qwen/qwen-2.5-7b-instruct:free
+- qwen/qwen-2-7b-instruct:free
+- qwen/qwen2.5-vl-32b-instruct:free (**Vision**)
+- qwen/qwen2-vl-7b-instruct:free (**Vision**)
+- qwen/qvq-72b-preview:free (**Vision**)
+
+**Microsoft Models:**
+- microsoft/phi-4:free
+- microsoft/phi-3.5-mini-128k-instruct:free
+- microsoft/phi-3-medium-128k-instruct:free
+
+**DeepSeek Models:**
+- deepseek/deepseek-r1-zero:free
+- deepseek/deepseek-r1-distill-llama-70b:free
+- deepseek/deepseek-r1-distill-llama-8b:free
+- deepseek/deepseek-r1-distill-qwen-32b:free
+- deepseek/deepseek-r1-distill-qwen-14b:free
+- deepseek/deepseek-r1-distill-qwen-7b:free
+- deepseek/deepseek-r1-distill-qwen-1.5b:free
+- deepseek/deepseek-chat:free
+- deepseek/deepseek-reasoner:free
+- deepseek/deepseek-coder:free
+- sophosympatheia/deephermes-3-405b:free
+
+**Nvidia Models:**
+- nvidia/llama-3.1-nemotron-70b-instruct:free
+- nvidia/nemotron-nano-12b-v2-vl:free (**Vision**)
 
 **Other Models:**
-- Microsoft Phi models (phi-3-medium, phi-3-mini)
-- Qwen models (qwen-2.5-7b, qwen-2-7b)
-- DeepSeek models (deepseek-r1 variants, deephermes-3)
-- OpenChat, Sophosympatheia models
+- openchat/openchat-8b:free
+- openchat/openchat-7b:free
+- anthropic/claude-sonnet-4.5:free
+- sophosympatheia/rogue-rose-103b-v0.6.0:free
+- sophosympatheia/midnight-rose-70b-v1.0.5:free
+- huggingfaceh4/zephyr-7b-beta:free
 
 #### Parameters:
 - `api_key`: ⚠️ Your OpenRouter API key (Get from [https://openrouter.ai/keys](https://openrouter.ai/keys))
@@ -205,10 +244,13 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - `help`: Comprehensive help text with usage information
 
 #### Vision Model Usage:
-1. Select a vision-capable model (contains "vision" in name)
+1. Select a vision-capable model (marked with **Vision** above)
 2. Connect an image to the `image_input` parameter
 3. Describe what you want to know about the image in `user_prompt`
-4. Vision-capable models: llama-3.2-*-vision, llama-4-maverick, llama-4-scout
+4. Vision-capable models include:
+   - Meta Llama: llama-4-maverick, llama-4-scout, llama-3.2-90b-vision
+   - Qwen: qwen2.5-vl-32b, qwen2-vl-7b, qvq-72b-preview
+   - Nvidia: nemotron-nano-12b-v2-vl
 
 ### OpenRouter Models Node
 Query and filter available models from OpenRouter's API.
@@ -301,27 +343,35 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
   - Enhanced input validation with validate_inputs method
   - Improved tooltips with detailed explanations for all parameters
   - Better error messages and debug mode support
+  - Fixed output labels to use proper display_name syntax
 - **OpenRouter Node v3**:
   - Converted to v3 spec with enhanced validation
-  - Updated free models list with latest offerings
+  - Updated free models list to current 50+ offerings (January 2025)
+  - Organized models by provider: Meta, Google, Mistral, Qwen, Microsoft, DeepSeek, Nvidia, Others
   - Set meta-llama/llama-3.3-70b-instruct:free as default model
   - Added comprehensive tooltips for all parameters
   - Enhanced error handling and debug mode
   - Better vision model detection and validation
+  - Updated vision models list with all current vision-capable models
+  - Fixed output labels to use proper display_name syntax
 - **OpenRouter Models Node v3**:
   - Converted to v3 spec
   - Enhanced validation and error handling
   - Improved tooltip documentation
+  - Fixed output labels to use proper display_name syntax
 - **Architecture**:
   - All nodes use stateless design with class methods
   - Class-level seed tracking for reproducibility
   - Maintained full backward compatibility with v1 API
   - Combined v3 entry point for all nodes
+  - Corrected combo input syntax (removed invalid enum classes)
+  - Proper output definition using display_name parameter
 - **Documentation**:
   - Comprehensive README updates for all v3 nodes
+  - Updated OpenRouter model list with all 50+ current free models
   - Production vs preview model guidance
   - Enhanced parameter optimization tips
-  - Detailed vision model usage instructions
+  - Detailed vision model usage instructions with current models
 
 ### v1.3.0
 - Groq node v3 conversion (initial v3 work)

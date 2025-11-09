@@ -193,16 +193,13 @@ class GroqNode(io.ComfyNode):
             ],
             outputs=[
                 io.String.Output(
-                    "response",
-                    tooltip="The model's generated text or JSON response"
+                    display_name="response"
                 ),
                 io.String.Output(
-                    "status",
-                    tooltip="Detailed information about the request including model used, seed value, and token counts"
+                    display_name="status"
                 ),
                 io.String.Output(
-                    "help",
-                    tooltip="Static help text with usage information and repository URL"
+                    display_name="help"
                 )
             ],
             is_output_node=True

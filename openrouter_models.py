@@ -54,12 +54,10 @@ class OpenRouterModels(io.ComfyNode):
             ],
             outputs=[
                 io.String.Output(
-                    "models",
-                    tooltip="Formatted list of models with ID, name, context length, and pricing information"
+                    display_name="models"
                 ),
                 io.String.Output(
-                    "status",
-                    tooltip="Status message indicating success, number of models found, or error details"
+                    display_name="status"
                 )
             ]
         )
