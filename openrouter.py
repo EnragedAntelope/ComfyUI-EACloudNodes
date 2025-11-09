@@ -25,49 +25,83 @@ class OpenrouterNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # OpenRouter free models list
+    # OpenRouter free models list (updated 2025)
     OPENROUTER_MODELS = [
-        # Google Models
-        "google/gemini-2.5-pro-exp:free",
-        "google/gemini-2.0-flash-exp:free",
-        "google/gemini-2.0-flash-thinking-exp:free",
-        "google/gemma-2-9b-it:free",
         # Meta Llama Models
         "meta-llama/llama-3.3-70b-instruct:free",
-        "meta-llama/llama-3.1-70b-instruct:free",
-        "meta-llama/llama-3.1-8b-instruct:free",
-        "meta-llama/llama-3.2-90b-vision-instruct:free",
-        "meta-llama/llama-3.2-11b-vision-instruct:free",
-        "meta-llama/llama-4-maverick-17b-128e-instruct:free",
-        "meta-llama/llama-4-scout-17b-16e-instruct:free",
-        # Mistral Models
-        "mistralai/mistral-small-3.1:free",
-        "mistralai/mistral-small-3:free",
-        "mistralai/mistral-saba-24b:free",
-        "mistralai/mistral-7b-instruct:free",
-        # Microsoft Models
-        "microsoft/phi-3-medium-128k-instruct:free",
-        "microsoft/phi-3-mini-128k-instruct:free",
-        # Qwen Models
-        "qwen/qwen-2.5-7b-instruct:free",
-        "qwen/qwen-2-7b-instruct:free",
+        "meta-llama/llama-3.3-8b-instruct:free",
+        "meta-llama/llama-3.2-3b-instruct:free",
+        "meta-llama/llama-4-maverick:free",
+        "meta-llama/llama-4-scout:free",
+        # Google Models
+        "google/gemini-2.0-flash-exp:free",
+        "google/gemma-3-27b-it:free",
+        "google/gemma-3-12b-it:free",
+        "google/gemma-3-4b-it:free",
+        "google/gemma-3n-e2b-it:free",
+        "google/gemma-3n-e4b-it:free",
         # DeepSeek Models
+        "deepseek/deepseek-r1:free",
+        "deepseek/deepseek-r1-0528:free",
         "deepseek/deepseek-r1-distill-llama-70b:free",
-        "deepseek/deepseek-r1-distill-qwen-32b:free",
-        "deepseek/deephermes-3:free",
-        # Other Models
-        "openchat/openchat-7b:free",
-        "sophosympatheia/rogue-rose-103b-v0.2:free",
+        "deepseek/deepseek-r1-0528-qwen3-8b:free",
+        "deepseek/deepseek-chat-v3-0324:free",
+        "deepseek/deepseek-chat-v3.1:free",
+        # Qwen Models
+        "qwen/qwen3-235b-a22b:free",
+        "qwen/qwen3-coder:free",
+        "qwen/qwen3-14b:free",
+        "qwen/qwen3-30b-a3b:free",
+        "qwen/qwen3-4b:free",
+        "qwen/qwen-2.5-72b-instruct:free",
+        "qwen/qwen-2.5-coder-32b-instruct:free",
+        "qwen/qwen2.5-vl-32b-instruct:free",
+        # Mistral Models
+        "mistralai/mistral-small-3.2-24b-instruct:free",
+        "mistralai/mistral-small-3.1-24b-instruct:free",
+        "mistralai/mistral-small-24b-instruct-2501:free",
+        "mistralai/mistral-nemo:free",
+        "mistralai/mistral-7b-instruct:free",
+        # NVIDIA Models
+        "nvidia/nemotron-nano-12b-v2-vl:free",
+        "nvidia/nemotron-nano-9b-v2:free",
+        # TNG Models
+        "tngtech/deepseek-r1t2-chimera:free",
+        "tngtech/deepseek-r1t-chimera:free",
+        # Microsoft Models
+        "microsoft/mai-ds-r1:free",
+        # OpenAI Models
+        "openai/gpt-oss-20b:free",
+        # MiniMax Models
+        "minimax/minimax-m2:free",
+        # Nous Research Models
+        "nousresearch/hermes-3-llama-3.1-405b:free",
+        # MoonshotAI Models
+        "moonshotai/kimi-k2:free",
+        # Meituan Models
+        "meituan/longcat-flash-chat:free",
+        # Z.AI Models
+        "z-ai/glm-4.5-air:free",
+        # Alibaba Models
+        "alibaba/tongyi-deepresearch-30b-a3b:free",
+        # ArliAI Models
+        "arliai/qwq-32b-arliai-rpr-v1:free",
+        # Agentica Models
+        "agentica-org/deepcoder-14b-preview:free",
+        # Venice Models
+        "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+        # OpenRouter Models
+        "openrouter/polaris-alpha",
         # Manual input option
         "Manual Input"
     ]
 
-    # Models that support vision capabilities (based on model name)
+    # Models that support vision capabilities
     VISION_MODELS = [
-        "meta-llama/llama-3.2-11b-vision-instruct:free",
-        "meta-llama/llama-3.2-90b-vision-instruct:free",
-        "meta-llama/llama-4-maverick-17b-128e-instruct:free",
-        "meta-llama/llama-4-scout-17b-16e-instruct:free"
+        "meta-llama/llama-4-maverick:free",
+        "meta-llama/llama-4-scout:free",
+        "nvidia/nemotron-nano-12b-v2-vl:free",
+        "qwen/qwen2.5-vl-32b-instruct:free"
     ]
 
     # Class-level storage for seed tracking (since nodes are stateless)
@@ -91,7 +125,7 @@ class OpenrouterNode(io.ComfyNode):
                     "model",
                     options=cls.OPENROUTER_MODELS,
                     default="meta-llama/llama-3.3-70b-instruct:free",
-                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' support image inputs."
+                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' or 'vl' support image inputs."
                 ),
                 io.String.Input(
                     "manual_model",
@@ -216,7 +250,7 @@ class OpenrouterNode(io.ComfyNode):
                 io.Image.Input(
                     "image_input",
                     optional=True,
-                    tooltip="Optional image input for vision-capable models. Supported models: llama-3.2-*-vision, llama-4-maverick, llama-4-scout. Maximum size: 2048x2048."
+                    tooltip="Optional image input for vision-capable models. Supported: llama-4-maverick/scout, nemotron-nano-12b-v2-vl, qwen2.5-vl-32b. Maximum size: 2048x2048."
                 ),
                 io.String.Input(
                     "additional_params",
@@ -228,16 +262,13 @@ class OpenrouterNode(io.ComfyNode):
             ],
             outputs=[
                 io.String.Output(
-                    "response",
-                    tooltip="The model's generated text or JSON response"
+                    display_name="response"
                 ),
                 io.String.Output(
-                    "status",
-                    tooltip="Detailed information about the request including model used, seed value, and token counts"
+                    display_name="status"
                 ),
                 io.String.Output(
-                    "help",
-                    tooltip="Static help text with usage information and repository URL"
+                    display_name="help"
                 )
             ],
             is_output_node=True
@@ -310,11 +341,10 @@ Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from https://openrouter.ai/keys
-- Model: Choose from free models or use Manual Input
+- Model: Choose from 50+ free models or use Manual Input
   * Default: meta-llama/llama-3.3-70b-instruct:free
-  * Vision: llama-3.2-*-vision, llama-4-maverick/scout
-  * Google: gemini-2.5-pro, gemini-2.0-flash variants
-  * Other: Mistral, Qwen, DeepSeek, Phi, and more
+  * Vision: llama-4-maverick/scout, nemotron-vl, qwen2.5-vl
+  * Other: Google Gemini/Gemma, DeepSeek, Qwen, Mistral, NVIDIA, and more
 - Manual Model: Custom model ID (provider/model-name[:free])
 - Base URL: API endpoint (usually leave as default)
 - System Prompt: Set AI behavior/context
@@ -335,21 +365,22 @@ Key Settings:
 
 Optional:
 - Image Input: For vision-capable models only
-  * llama-3.2-11b-vision-instruct:free
-  * llama-3.2-90b-vision-instruct:free
-  * llama-4-maverick-17b-128e-instruct:free
-  * llama-4-scout-17b-16e-instruct:free
+  * meta-llama/llama-4-maverick:free
+  * meta-llama/llama-4-scout:free
+  * nvidia/nemotron-nano-12b-v2-vl:free
+  * qwen/qwen2.5-vl-32b-instruct:free
   * Max size: 2048x2048
 - Additional Params: Extra model parameters in JSON
 
 Vision Models:
-1. Select a vision-capable model (contains 'vision' in name)
+1. Select a vision-capable model (has 'vision' or 'vl' in name)
 2. Connect an image to image_input
 3. Describe what you want to know about the image in user_prompt
 
 Free Models:
-All models in the dropdown include ':free' suffix for free-tier access.
-OpenRouter provides free access to many models with rate limits.
+All models in the dropdown include ':free' suffix for free-tier access
+(except openrouter/polaris-alpha which is always free).
+OpenRouter provides free access to 50+ models with rate limits.
 
 For full documentation and examples, visit:
 https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
@@ -389,13 +420,13 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             cls._last_seed[node_id] = seed
 
             # Check if model supports vision capabilities
-            is_vision_model = "vision" in actual_model.lower() or actual_model in cls.VISION_MODELS
+            is_vision_model = "vision" in actual_model.lower() or "vl" in actual_model.lower() or actual_model in cls.VISION_MODELS
 
             # Vision model validation
             if image_input is not None and not is_vision_model:
                 return io.NodeOutput(
                     "",
-                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' in its name. Vision-capable models: {', '.join(cls.VISION_MODELS)}",
+                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' or 'vl' in its name. Vision-capable models: {', '.join(cls.VISION_MODELS)}",
                     help_text
                 )
 
