@@ -6,6 +6,7 @@ Supports text and vision-language models through Groq's API.
 import json
 import requests
 import base64
+import time
 from PIL import Image
 import io as python_io
 import torch
@@ -24,40 +25,41 @@ class GroqNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # Available Groq models
+    # Available Groq models (updated March 2026)
     GROQ_MODELS = [
-        # Production Models
+        # --- Featured ---
+        "groq/compound",
+        "openai/gpt-oss-120b",
+        # --- Production: Chat ---
         "llama-3.1-8b-instant",
         "llama-3.3-70b-versatile",
-        "meta-llama/llama-guard-4-12b",
-        "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
+        # --- Production: Systems ---
+        "groq/compound-mini",
+        # --- Production: Audio (Speech-to-Text) ---
         "whisper-large-v3",
         "whisper-large-v3-turbo",
-        # Production Systems
-        "groq/compound",
-        "groq/compound-mini",
-        # Preview Models
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        # --- Preview: Chat ---
         "meta-llama/llama-4-scout-17b-16e-instruct",
-        "meta-llama/llama-prompt-guard-2-22m",
-        "meta-llama/llama-prompt-guard-2-86m",
         "moonshotai/kimi-k2-instruct-0905",
         "openai/gpt-oss-safeguard-20b",
-        "playai-tts",
-        "playai-tts-arabic",
         "qwen/qwen3-32b",
-        # Manual input option
+        # --- Preview: Safety ---
+        "meta-llama/llama-prompt-guard-2-22m",
+        "meta-llama/llama-prompt-guard-2-86m",
+        # --- Preview: Audio (Text-to-Speech) ---
+        "canopylabs/orpheus-arabic-saudi",
+        "canopylabs/orpheus-v1-english",
+        # --- Manual Input ---
         "Manual Input"
     ]
 
     # Models that support vision capabilities
     VISION_MODELS = [
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
         "meta-llama/llama-4-scout-17b-16e-instruct"
     ]
 
-    # Class-level storage for seed tracking (since nodes are stateless)
+    # Class-level storage for seed tracking per node instance
     _last_seed = {}
 
     @classmethod
@@ -181,7 +183,7 @@ class GroqNode(io.ComfyNode):
                 io.Image.Input(
                     "image_input",
                     optional=True,
-                    tooltip="Optional image input for vision-capable models. Currently supported models: meta-llama/llama-4-maverick-17b-128e-instruct and meta-llama/llama-4-scout-17b-16e-instruct."
+                    tooltip="Optional image input for vision-capable models. Currently supported: meta-llama/llama-4-scout-17b-16e-instruct. Maximum size: 2048x2048."
                 ),
                 io.String.Input(
                     "additional_params",
@@ -263,8 +265,9 @@ Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 Key Settings:
 - API Key: Get from https://console.groq.com/keys
 - Model: Choose from dropdown or use Manual Input
-  * Production: llama-3.3-70b-versatile (default), llama-3.1-8b-instant, etc.
-  * Preview: llama-4-maverick/scout (vision), qwen3-32b, etc.
+  * Featured: groq/compound, openai/gpt-oss-120b
+  * Production Chat: llama-3.3-70b-versatile (default), llama-3.1-8b-instant, etc.
+  * Preview Chat: llama-4-scout (vision), kimi-k2, qwen3-32b, etc.
 - System Prompt: Set AI behavior/context (disable for vision models)
 - User Prompt: Main input for the model
 - Send System: Toggle system prompt (off for vision models)
@@ -280,14 +283,14 @@ Key Settings:
 - Debug Mode: Enable for detailed error messages
 
 Optional:
-- Image Input: For Llama-4 vision models only
-  * meta-llama/llama-4-maverick-17b-128e-instruct
+- Image Input: For Llama-4 Scout vision model only
   * meta-llama/llama-4-scout-17b-16e-instruct
+  * Max size: 2048x2048 per dimension
 - Additional Params: Extra model parameters in JSON
 
 Vision Models:
 1. Connect an image to image_input
-2. Select a vision-capable model (Llama-4 Maverick or Scout)
+2. Select meta-llama/llama-4-scout-17b-16e-instruct
 3. Set 'send_system' to 'no'
 4. Describe what you want to know about the image in user_prompt
 
@@ -315,20 +318,21 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             actual_model = manual_model.strip() if model == "Manual Input" else model
 
             # Handle seed based on mode
-            node_id = id(cls)  # Use class id as a simple identifier
+            # Key by (model, seed_value) so each node instance gets its own counter
+            node_key = (actual_model, seed_value)
             if seed_mode == "random":
                 seed = random.randint(0, cls.MAX_SAFE_INTEGER)
             elif seed_mode == "increment":
-                last_seed = cls._last_seed.get(node_id, 0)
+                last_seed = cls._last_seed.get(node_key, seed_value)
                 seed = (last_seed + 1) % cls.MAX_SAFE_INTEGER
             elif seed_mode == "decrement":
-                last_seed = cls._last_seed.get(node_id, 0)
+                last_seed = cls._last_seed.get(node_key, seed_value)
                 seed = (last_seed - 1) if last_seed > 0 else cls.MAX_SAFE_INTEGER
             else:  # "fixed"
                 seed = seed_value
 
             # Store the seed we're using
-            cls._last_seed[node_id] = seed
+            cls._last_seed[node_key] = seed
 
             # Check if model supports vision capabilities
             is_vision_model = actual_model in cls.VISION_MODELS
@@ -369,6 +373,14 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                         pil_image = image_input
                     else:
                         return io.NodeOutput("", "Error: Unsupported image input type", help_text)
+
+                    # Validate image dimensions (max 2048 in either dimension)
+                    if pil_image.size[0] > 2048 or pil_image.size[1] > 2048:
+                        return io.NodeOutput(
+                            "",
+                            f"Error: Image too large ({pil_image.size[0]}x{pil_image.size[1]}). Maximum is 2048 pixels in either dimension. Please resize your image.",
+                            help_text
+                        )
 
                     # Convert image to base64
                     buffered = python_io.BytesIO()
@@ -443,7 +455,6 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
 
                     if response.status_code in retryable_codes and retries < max_retries:
                         retries += 1
-                        import time
                         time.sleep(2 ** retries)  # Exponential backoff: 2, 4, 8, 16... seconds
                         continue
 
@@ -497,13 +508,9 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     # Retry network-related errors
                     if retries < max_retries:
                         retries += 1
-                        import time
                         time.sleep(2 ** retries)
                         continue
                     return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
-
-                # Break out of retry loop
-                break
 
         except Exception as e:
             return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)

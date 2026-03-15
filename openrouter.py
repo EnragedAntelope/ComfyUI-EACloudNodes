@@ -16,6 +16,85 @@ import random
 from comfy_api.latest import ComfyExtension, io
 
 
+# Module-level cache for dynamically fetched models
+_openrouter_model_cache = {
+    "models": None,
+    "vision_models": None,
+    "last_fetch": 0,
+    "cache_ttl": 300  # 5 minutes
+}
+
+
+def _fetch_openrouter_free_models():
+    """
+    Fetch free models from OpenRouter's public API with caching.
+    Returns (model_list, vision_model_list) or (None, None) on failure.
+    The model list includes 'Manual Input' as the last entry.
+    """
+    now = time.time()
+
+    # Return cached results if still fresh
+    if (_openrouter_model_cache["models"] is not None and
+            now - _openrouter_model_cache["last_fetch"] < _openrouter_model_cache["cache_ttl"]):
+        return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
+
+    try:
+        response = requests.get(
+            "https://openrouter.ai/api/v1/models",
+            timeout=5
+        )
+        if response.status_code != 200:
+            raise Exception(f"API returned status {response.status_code}")
+
+        data = response.json().get("data", [])
+
+        free_models = []
+        vision_models = []
+
+        for model in data:
+            pricing = model.get("pricing", {})
+            try:
+                is_free = (
+                    float(pricing.get("prompt", "1")) == 0 and
+                    float(pricing.get("completion", "1")) == 0
+                )
+            except (ValueError, TypeError):
+                continue
+
+            if not is_free:
+                continue
+
+            model_id = model.get("id", "")
+            if not model_id:
+                continue
+
+            free_models.append(model_id)
+
+            # Detect vision-capable models from architecture metadata
+            arch = model.get("architecture", {})
+            modality = arch.get("modality", "").lower()
+            model_name = model.get("name", "").lower()
+            if ("image" in modality or "multimodal" in modality or
+                    "vision" in model_name or "vl" in model_name or
+                    "vision" in model_id.lower() or "vl" in model_id.lower()):
+                vision_models.append(model_id)
+
+        free_models.sort()
+        free_models.append("Manual Input")
+
+        _openrouter_model_cache["models"] = free_models
+        _openrouter_model_cache["vision_models"] = vision_models
+        _openrouter_model_cache["last_fetch"] = now
+
+        return free_models, vision_models
+
+    except Exception:
+        # Return previously cached results if available, otherwise None
+        if _openrouter_model_cache["models"] is not None:
+            return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
+        return None, None
+
+
 class OpenrouterNode(io.ComfyNode):
     """
     A node for interacting with OpenRouter API.
@@ -25,90 +104,22 @@ class OpenrouterNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # OpenRouter free models list (updated 2025)
-    OPENROUTER_MODELS = [
-        # Meta Llama Models
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "meta-llama/llama-3.3-8b-instruct:free",
-        "meta-llama/llama-3.2-3b-instruct:free",
-        "meta-llama/llama-4-maverick:free",
-        "meta-llama/llama-4-scout:free",
-        # Google Models
-        "google/gemini-2.0-flash-exp:free",
-        "google/gemma-3-27b-it:free",
-        "google/gemma-3-12b-it:free",
-        "google/gemma-3-4b-it:free",
-        "google/gemma-3n-e2b-it:free",
-        "google/gemma-3n-e4b-it:free",
-        # DeepSeek Models
-        "deepseek/deepseek-r1:free",
-        "deepseek/deepseek-r1-0528:free",
-        "deepseek/deepseek-r1-distill-llama-70b:free",
-        "deepseek/deepseek-r1-0528-qwen3-8b:free",
-        "deepseek/deepseek-chat-v3-0324:free",
-        "deepseek/deepseek-chat-v3.1:free",
-        # Qwen Models
-        "qwen/qwen3-235b-a22b:free",
-        "qwen/qwen3-coder:free",
-        "qwen/qwen3-14b:free",
-        "qwen/qwen3-30b-a3b:free",
-        "qwen/qwen3-4b:free",
-        "qwen/qwen-2.5-72b-instruct:free",
-        "qwen/qwen-2.5-coder-32b-instruct:free",
-        "qwen/qwen2.5-vl-32b-instruct:free",
-        # Mistral Models
-        "mistralai/mistral-small-3.2-24b-instruct:free",
-        "mistralai/mistral-small-3.1-24b-instruct:free",
-        "mistralai/mistral-small-24b-instruct-2501:free",
-        "mistralai/mistral-nemo:free",
-        "mistralai/mistral-7b-instruct:free",
-        # NVIDIA Models
-        "nvidia/nemotron-nano-12b-v2-vl:free",
-        "nvidia/nemotron-nano-9b-v2:free",
-        # TNG Models
-        "tngtech/deepseek-r1t2-chimera:free",
-        "tngtech/deepseek-r1t-chimera:free",
-        # Microsoft Models
-        "microsoft/mai-ds-r1:free",
-        # OpenAI Models
-        "openai/gpt-oss-20b:free",
-        # MiniMax Models
-        "minimax/minimax-m2:free",
-        # Nous Research Models
-        "nousresearch/hermes-3-llama-3.1-405b:free",
-        # MoonshotAI Models
-        "moonshotai/kimi-k2:free",
-        # Meituan Models
-        "meituan/longcat-flash-chat:free",
-        # Z.AI Models
-        "z-ai/glm-4.5-air:free",
-        # Alibaba Models
-        "alibaba/tongyi-deepresearch-30b-a3b:free",
-        # ArliAI Models
-        "arliai/qwq-32b-arliai-rpr-v1:free",
-        # Agentica Models
-        "agentica-org/deepcoder-14b-preview:free",
-        # Venice Models
-        "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-        # OpenRouter Models
-        "openrouter/polaris-alpha",
-        # Manual input option
-        "Manual Input"
-    ]
-
-    # Models that support vision capabilities
-    VISION_MODELS = [
-        "meta-llama/llama-4-maverick:free",
-        "meta-llama/llama-4-scout:free",
-        "nvidia/nemotron-nano-12b-v2-vl:free",
-        "qwen/qwen2.5-vl-32b-instruct:free"
-    ]
-
-    # Class-level storage for seed tracking (since nodes are stateless)
+    # Class-level storage for seed tracking per node instance
     _last_seed = {}
 
     @classmethod
     def define_schema(cls) -> io.Schema:
+        # Dynamically fetch free models from OpenRouter's public API
+        models, _ = _fetch_openrouter_free_models()
+        if models is None:
+            # API unreachable - provide Manual Input as the only option
+            models = ["Manual Input"]
+
+        # Pick a sensible default from the fetched list
+        default_model = "meta-llama/llama-3.3-70b-instruct:free"
+        if default_model not in models:
+            default_model = models[0] if models and models[0] != "Manual Input" else "Manual Input"
+
         return io.Schema(
             node_id="OpenrouterNode",
             display_name="OpenRouter Chat",
@@ -123,9 +134,9 @@ class OpenrouterNode(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "model",
-                    options=cls.OPENROUTER_MODELS,
-                    default="meta-llama/llama-3.3-70b-instruct:free",
-                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' or 'vl' support image inputs."
+                    options=models,
+                    default=default_model,
+                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' or 'vl' support image inputs. Use ComfyUI's Refresh to update this list from OpenRouter's API."
                 ),
                 io.String.Input(
                     "manual_model",
@@ -341,10 +352,8 @@ Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from https://openrouter.ai/keys
-- Model: Choose from 50+ free models or use Manual Input
-  * Default: meta-llama/llama-3.3-70b-instruct:free
-  * Vision: llama-4-maverick/scout, nemotron-vl, qwen2.5-vl
-  * Other: Google Gemini/Gemma, DeepSeek, Qwen, Mistral, NVIDIA, and more
+- Model: Dropdown auto-populates with free models from OpenRouter's API.
+  Use ComfyUI's Refresh to update the list. Choose 'Manual Input' for custom models.
 - Manual Model: Custom model ID (provider/model-name[:free])
 - Base URL: API endpoint (usually leave as default)
 - System Prompt: Set AI behavior/context
@@ -364,23 +373,14 @@ Key Settings:
 - Debug Mode: Enable for detailed error messages
 
 Optional:
-- Image Input: For vision-capable models only
-  * meta-llama/llama-4-maverick:free
-  * meta-llama/llama-4-scout:free
-  * nvidia/nemotron-nano-12b-v2-vl:free
-  * qwen/qwen2.5-vl-32b-instruct:free
-  * Max size: 2048x2048
+- Image Input: For vision-capable models (with 'vision' or 'vl' in name)
+  * Max size: 2048x2048 per dimension
 - Additional Params: Extra model parameters in JSON
 
 Vision Models:
 1. Select a vision-capable model (has 'vision' or 'vl' in name)
 2. Connect an image to image_input
 3. Describe what you want to know about the image in user_prompt
-
-Free Models:
-All models in the dropdown include ':free' suffix for free-tier access
-(except openrouter/polaris-alpha which is always free).
-OpenRouter provides free access to 50+ models with rate limits.
 
 For full documentation and examples, visit:
 https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
@@ -404,29 +404,33 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             actual_model = manual_model.strip() if model == "Manual Input" else model
 
             # Handle seed based on mode
-            node_id = id(cls)  # Use class id as a simple identifier
+            # Key by (model, seed_value) so each node instance gets its own counter
+            node_key = (actual_model, seed_value)
             if seed_mode == "random":
                 seed = random.randint(0, cls.MAX_SAFE_INTEGER)
             elif seed_mode == "increment":
-                last_seed = cls._last_seed.get(node_id, 0)
+                last_seed = cls._last_seed.get(node_key, seed_value)
                 seed = (last_seed + 1) % cls.MAX_SAFE_INTEGER
             elif seed_mode == "decrement":
-                last_seed = cls._last_seed.get(node_id, 0)
+                last_seed = cls._last_seed.get(node_key, seed_value)
                 seed = (last_seed - 1) if last_seed > 0 else cls.MAX_SAFE_INTEGER
             else:  # "fixed"
                 seed = seed_value
 
             # Store the seed we're using
-            cls._last_seed[node_id] = seed
+            cls._last_seed[node_key] = seed
 
             # Check if model supports vision capabilities
-            is_vision_model = "vision" in actual_model.lower() or "vl" in actual_model.lower() or actual_model in cls.VISION_MODELS
+            _, vision_models = _fetch_openrouter_free_models()
+            if vision_models is None:
+                vision_models = []
+            is_vision_model = "vision" in actual_model.lower() or "vl" in actual_model.lower() or actual_model in vision_models
 
             # Vision model validation
             if image_input is not None and not is_vision_model:
                 return io.NodeOutput(
                     "",
-                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' or 'vl' in its name. Vision-capable models: {', '.join(cls.VISION_MODELS)}",
+                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' or 'vl' in its name. Vision-capable models: {', '.join(vision_models)}",
                     help_text
                 )
 
@@ -465,11 +469,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     else:
                         return io.NodeOutput("", "Error: Unsupported image input type", help_text)
 
-                    # Add size validation
-                    if pil_image.size[0] * pil_image.size[1] > 2048 * 2048:
+                    # Validate image dimensions (max 2048 in either dimension)
+                    if pil_image.size[0] > 2048 or pil_image.size[1] > 2048:
                         return io.NodeOutput(
                             "",
-                            "Error: Image too large. Maximum size is 2048x2048. Please resize your image.",
+                            f"Error: Image too large ({pil_image.size[0]}x{pil_image.size[1]}). Maximum is 2048 pixels in either dimension. Please resize your image.",
                             help_text
                         )
 
@@ -611,9 +615,6 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
                 except json.JSONDecodeError:
                     return io.NodeOutput("", "Error: Invalid JSON response from OpenRouter", help_text)
-
-                # Break out of retry loop
-                break
 
         except Exception as e:
             return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)
