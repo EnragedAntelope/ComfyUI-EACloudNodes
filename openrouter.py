@@ -16,6 +16,85 @@ import random
 from comfy_api.latest import ComfyExtension, io
 
 
+# Module-level cache for dynamically fetched models
+_openrouter_model_cache = {
+    "models": None,
+    "vision_models": None,
+    "last_fetch": 0,
+    "cache_ttl": 300  # 5 minutes
+}
+
+
+def _fetch_openrouter_free_models():
+    """
+    Fetch free models from OpenRouter's public API with caching.
+    Returns (model_list, vision_model_list) or (None, None) on failure.
+    The model list includes 'Manual Input' as the last entry.
+    """
+    now = time.time()
+
+    # Return cached results if still fresh
+    if (_openrouter_model_cache["models"] is not None and
+            now - _openrouter_model_cache["last_fetch"] < _openrouter_model_cache["cache_ttl"]):
+        return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
+
+    try:
+        response = requests.get(
+            "https://openrouter.ai/api/v1/models",
+            timeout=5
+        )
+        if response.status_code != 200:
+            raise Exception(f"API returned status {response.status_code}")
+
+        data = response.json().get("data", [])
+
+        free_models = []
+        vision_models = []
+
+        for model in data:
+            pricing = model.get("pricing", {})
+            try:
+                is_free = (
+                    float(pricing.get("prompt", "1")) == 0 and
+                    float(pricing.get("completion", "1")) == 0
+                )
+            except (ValueError, TypeError):
+                continue
+
+            if not is_free:
+                continue
+
+            model_id = model.get("id", "")
+            if not model_id:
+                continue
+
+            free_models.append(model_id)
+
+            # Detect vision-capable models from architecture metadata
+            arch = model.get("architecture", {})
+            modality = arch.get("modality", "").lower()
+            model_name = model.get("name", "").lower()
+            if ("image" in modality or "multimodal" in modality or
+                    "vision" in model_name or "vl" in model_name or
+                    "vision" in model_id.lower() or "vl" in model_id.lower()):
+                vision_models.append(model_id)
+
+        free_models.sort()
+        free_models.append("Manual Input")
+
+        _openrouter_model_cache["models"] = free_models
+        _openrouter_model_cache["vision_models"] = vision_models
+        _openrouter_model_cache["last_fetch"] = now
+
+        return free_models, vision_models
+
+    except Exception:
+        # Return previously cached results if available, otherwise None
+        if _openrouter_model_cache["models"] is not None:
+            return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
+        return None, None
+
+
 class OpenrouterNode(io.ComfyNode):
     """
     A node for interacting with OpenRouter API.
@@ -25,8 +104,8 @@ class OpenrouterNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # OpenRouter free models list (updated 2025)
-    OPENROUTER_MODELS = [
+    # Default/fallback model list used when API fetch fails
+    DEFAULT_MODELS = [
         # Meta Llama Models
         "meta-llama/llama-3.3-70b-instruct:free",
         "meta-llama/llama-3.3-8b-instruct:free",
@@ -96,8 +175,8 @@ class OpenrouterNode(io.ComfyNode):
         "Manual Input"
     ]
 
-    # Models that support vision capabilities
-    VISION_MODELS = [
+    # Default vision models fallback
+    DEFAULT_VISION_MODELS = [
         "meta-llama/llama-4-maverick:free",
         "meta-llama/llama-4-scout:free",
         "nvidia/nemotron-nano-12b-v2-vl:free",
@@ -109,6 +188,16 @@ class OpenrouterNode(io.ComfyNode):
 
     @classmethod
     def define_schema(cls) -> io.Schema:
+        # Dynamically fetch models from OpenRouter API (with fallback to defaults)
+        models, _ = _fetch_openrouter_free_models()
+        if models is None:
+            models = cls.DEFAULT_MODELS
+
+        # Ensure the default model is available in the list
+        default_model = "meta-llama/llama-3.3-70b-instruct:free"
+        if default_model not in models:
+            default_model = models[0] if models and models[0] != "Manual Input" else "Manual Input"
+
         return io.Schema(
             node_id="OpenrouterNode",
             display_name="OpenRouter Chat",
@@ -123,9 +212,9 @@ class OpenrouterNode(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "model",
-                    options=cls.OPENROUTER_MODELS,
-                    default="meta-llama/llama-3.3-70b-instruct:free",
-                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' or 'vl' support image inputs."
+                    options=models,
+                    default=default_model,
+                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' or 'vl' support image inputs. Use ComfyUI's Refresh to update this list from OpenRouter's API."
                 ),
                 io.String.Input(
                     "manual_model",
@@ -420,13 +509,16 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             cls._last_seed[node_id] = seed
 
             # Check if model supports vision capabilities
-            is_vision_model = "vision" in actual_model.lower() or "vl" in actual_model.lower() or actual_model in cls.VISION_MODELS
+            _, vision_models = _fetch_openrouter_free_models()
+            if vision_models is None:
+                vision_models = cls.DEFAULT_VISION_MODELS
+            is_vision_model = "vision" in actual_model.lower() or "vl" in actual_model.lower() or actual_model in vision_models
 
             # Vision model validation
             if image_input is not None and not is_vision_model:
                 return io.NodeOutput(
                     "",
-                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' or 'vl' in its name. Vision-capable models: {', '.join(cls.VISION_MODELS)}",
+                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' or 'vl' in its name. Vision-capable models: {', '.join(vision_models)}",
                     help_text
                 )
 
@@ -611,9 +703,6 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
                 except json.JSONDecodeError:
                     return io.NodeOutput("", "Error: Invalid JSON response from OpenRouter", help_text)
-
-                # Break out of retry loop
-                break
 
         except Exception as e:
             return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)

@@ -6,6 +6,7 @@ Supports text and vision-language models through Groq's API.
 import json
 import requests
 import base64
+import time
 from PIL import Image
 import io as python_io
 import torch
@@ -443,7 +444,6 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
 
                     if response.status_code in retryable_codes and retries < max_retries:
                         retries += 1
-                        import time
                         time.sleep(2 ** retries)  # Exponential backoff: 2, 4, 8, 16... seconds
                         continue
 
@@ -497,13 +497,9 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     # Retry network-related errors
                     if retries < max_retries:
                         retries += 1
-                        import time
                         time.sleep(2 ** retries)
                         continue
                     return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
-
-                # Break out of retry loop
-                break
 
         except Exception as e:
             return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)
