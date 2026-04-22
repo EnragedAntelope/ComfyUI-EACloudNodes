@@ -15,6 +15,207 @@ import random
 
 from comfy_api.latest import ComfyExtension, io
 
+# ============================================================================
+# MODULE-LEVEL CONSTANTS (Dynamic Model Fetching)
+# ============================================================================
+
+# Module-level cache for dynamically fetched models (5-minute TTL)
+_groq_model_cache = {
+    "models": None,
+    "vision_models": None,
+    "last_fetch": 0,
+    "cache_ttl": 300  # 5 minutes
+}
+
+# Model categorization mapping (hybrid approach - applied to fetched models)
+MODEL_CATEGORIES = {
+    "Featured": ["groq/compound", "openai/gpt-oss-120b"],
+    "Production: Chat": ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
+    "Production: Systems": ["groq/compound-mini"],
+    "Production: Audio": ["whisper-large-v3", "whisper-large-v3-turbo"],
+    "Preview: Chat": [
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "openai/gpt-oss-safeguard-20b",
+        "qwen/qwen3-32b",
+    ],
+    "Preview: Safety": [
+        "meta-llama/llama-prompt-guard-2-22m",
+        "meta-llama/llama-prompt-guard-2-86m",
+    ],
+    "Preview: Audio": [
+        "canopylabs/orpheus-arabic-saudi",
+        "canopylabs/orpheus-v1-english",
+    ],
+}
+
+# Known vision models (hybrid detection: hardcoded list + pattern matching)
+KNOWN_VISION_MODELS = [
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+]
+VISION_PATTERNS = ["vision", "vl", "-4-"]  # Patterns for detecting unknown vision models
+
+# Static fallback list (used when API unavailable)
+STATIC_FALLBACK_MODELS = [
+    "--- Featured ---",
+    "groq/compound",
+    "openai/gpt-oss-120b",
+    "--- Production: Chat ---",
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-20b",
+    "--- Production: Systems ---",
+    "groq/compound-mini",
+    "--- Production: Audio ---",
+    "whisper-large-v3",
+    "whisper-large-v3-turbo",
+    "--- Preview: Chat ---",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "openai/gpt-oss-safeguard-20b",
+    "qwen/qwen3-32b",
+    "--- Preview: Safety ---",
+    "meta-llama/llama-prompt-guard-2-22m",
+    "meta-llama/llama-prompt-guard-2-86m",
+    "--- Preview: Audio ---",
+    "canopylabs/orpheus-arabic-saudi",
+    "canopylabs/orpheus-v1-english",
+    "Manual Input",
+]
+
+
+# ============================================================================
+# MODULE-LEVEL FUNCTIONS (Dynamic Model Fetching)
+# ============================================================================
+
+def _get_static_fallback_models() -> tuple[list[str], list[str]]:
+    """Return comprehensive static fallback list."""
+    return STATIC_FALLBACK_MODELS.copy(), KNOWN_VISION_MODELS.copy()
+
+
+def _categorize_groq_models(api_models: list[dict]) -> list[str]:
+    """
+    Apply hardcoded categorization to fetched models.
+    Models not in mapping go to 'Other' category.
+    """
+    # Build reverse mapping: model_id -> category
+    model_to_category = {}
+    for category, model_list in MODEL_CATEGORIES.items():
+        for model_id in model_list:
+            model_to_category[model_id] = category
+    
+    # Group fetched models by category
+    categorized = {cat: [] for cat in MODEL_CATEGORIES.keys()}
+    categorized["Other"] = []
+    
+    for model in api_models:
+        model_id = model.get("id", "")
+        if not model_id or not model.get("active", True):
+            continue
+        
+        # Find matching category
+        if model_id in model_to_category:
+            categorized[model_to_category[model_id]].append(model_id)
+        else:
+            categorized["Other"].append(model_id)
+    
+    # Build final list with category headers
+    result = []
+    for category in MODEL_CATEGORIES.keys():
+        if categorized[category]:
+            result.append(f"--- {category} ---")
+            result.extend(sorted(categorized[category]))
+    
+    if categorized["Other"]:
+        result.append("--- Other ---")
+        result.extend(sorted(categorized["Other"]))
+    
+    result.append("Manual Input")
+    return result
+
+
+def _detect_vision_models(api_models: list[dict]) -> list[str]:
+    """
+    Detect vision-capable models using hybrid approach:
+    1. Include all KNOWN_VISION_MODELS that exist in API response
+    2. Pattern-match model IDs for vision indicators
+    """
+    vision_models = []
+    
+    for model in api_models:
+        model_id = model.get("id", "")
+        if not model_id or not model.get("active", True):
+            continue
+        
+        # Check hardcoded list
+        if model_id in KNOWN_VISION_MODELS:
+            vision_models.append(model_id)
+            continue
+        
+        # Pattern matching
+        if any(pattern in model_id.lower() for pattern in VISION_PATTERNS):
+            vision_models.append(model_id)
+    
+    return vision_models
+
+
+def _fetch_groq_models(api_key: str = None) -> tuple[list[str], list[str]]:
+    """
+    Fetch available models from Groq API with 5-minute caching.
+    
+    Args:
+        api_key: Optional Groq API key. If not provided, returns static fallback.
+    
+    Returns:
+        tuple: (categorized_model_list, vision_model_list)
+               Returns static fallback if API call fails or no key provided.
+    """
+    now = time.time()
+    
+    # Return cached results if still fresh
+    if (_groq_model_cache["models"] is not None and
+            now - _groq_model_cache["last_fetch"] < _groq_model_cache["cache_ttl"]):
+        return _groq_model_cache["models"], _groq_model_cache["vision_models"]
+    
+    # If no API key, return static fallback
+    if not api_key or not api_key.strip():
+        return _get_static_fallback_models()
+    
+    try:
+        # Fetch from Groq API
+        response = requests.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"API returned status {response.status_code}")
+        
+        data = response.json().get("data", [])
+        
+        # Build categorized model list
+        categorized_models = _categorize_groq_models(data)
+        
+        # Detect vision-capable models
+        vision_models = _detect_vision_models(data)
+        
+        # Update cache
+        _groq_model_cache["models"] = categorized_models
+        _groq_model_cache["vision_models"] = vision_models
+        _groq_model_cache["last_fetch"] = now
+        
+        return categorized_models, vision_models
+        
+    except Exception:
+        # Return previously cached results if available
+        if _groq_model_cache["models"] is not None:
+            return _groq_model_cache["models"], _groq_model_cache["vision_models"]
+        # Return static fallback
+        return _get_static_fallback_models()
+
+
+# ============================================================================
+# GROQ NODE CLASS
+# ============================================================================
 
 class GroqNode(io.ComfyNode):
     """
@@ -25,40 +226,6 @@ class GroqNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # Available Groq models (updated March 2026)
-    GROQ_MODELS = [
-        # --- Featured ---
-        "groq/compound",
-        "openai/gpt-oss-120b",
-        # --- Production: Chat ---
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "openai/gpt-oss-20b",
-        # --- Production: Systems ---
-        "groq/compound-mini",
-        # --- Production: Audio (Speech-to-Text) ---
-        "whisper-large-v3",
-        "whisper-large-v3-turbo",
-        # --- Preview: Chat ---
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "moonshotai/kimi-k2-instruct-0905",
-        "openai/gpt-oss-safeguard-20b",
-        "qwen/qwen3-32b",
-        # --- Preview: Safety ---
-        "meta-llama/llama-prompt-guard-2-22m",
-        "meta-llama/llama-prompt-guard-2-86m",
-        # --- Preview: Audio (Text-to-Speech) ---
-        "canopylabs/orpheus-arabic-saudi",
-        "canopylabs/orpheus-v1-english",
-        # --- Manual Input ---
-        "Manual Input"
-    ]
-
-    # Models that support vision capabilities
-    VISION_MODELS = [
-        "meta-llama/llama-4-scout-17b-16e-instruct"
-    ]
-
     # Class-level storage for seed tracking per node instance
     _last_seed = {}
 
@@ -68,7 +235,7 @@ class GroqNode(io.ComfyNode):
             node_id="GroqNode",
             display_name="Groq Chat",
             category="Groq",
-            description="Interact with Groq's API for ultra-fast inference with various LLM models. Supports text generation, JSON output, and vision analysis with compatible models.",
+            description="Interact with Groq's API for ultra-fast inference. Model list dynamically fetched from Groq API (5-min cache). Supports text generation, JSON output, and vision analysis with compatible models.",
             inputs=[
                 io.String.Input(
                     "api_key",
@@ -78,9 +245,9 @@ class GroqNode(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "model",
-                    options=cls.GROQ_MODELS,
+                options=_fetch_groq_models(api_key=None)[0],
                     default="llama-3.3-70b-versatile",
-                    tooltip="Select a Groq model or choose 'Manual Input' to specify a custom model. Production models are stable; Preview models are for evaluation only."
+                tooltip="Select a Groq model or choose 'Manual Input'. Categories: Featured, Production (stable), Preview (evaluation). Use ComfyUI Refresh to update model list from Groq API."
                 ),
                 io.String.Input(
                     "manual_model",
@@ -264,6 +431,18 @@ Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from https://console.groq.com/keys
+  * Used to fetch latest model list from Groq API (5-minute cache)
+- Model: Dynamically fetched from Groq API with categories:
+  * Featured: groq/compound, openai/gpt-oss-120b
+  * Production: Stable models for production use (llama-3.3-70b-versatile default)
+  * Preview: Experimental models (may be deprecated)
+  * Use ComfyUI's Refresh button to update model list from Groq API
+  * Falls back to static list if API unavailable
+- System Prompt: Set AI behavior/context (disable for vision models)
+Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
+
+Key Settings:
+- API Key: Get from https://console.groq.com/keys
 - Model: Choose from dropdown or use Manual Input
   * Featured: groq/compound, openai/gpt-oss-120b
   * Production Chat: llama-3.3-70b-versatile (default), llama-3.1-8b-instant, etc.
@@ -283,6 +462,24 @@ Key Settings:
 - Debug Mode: Enable for detailed error messages
 
 Optional:
+- Image Input: For vision-capable models (auto-detected)
+  * Known: meta-llama/llama-4-scout-17b-16e-instruct
+  * Pattern detection: models with 'vision', 'vl', or '-4-' in ID
+  * Max size: 2048x2048 per dimension
+- Additional Params: Extra model parameters in JSON
+
+Vision Models:
+1. Connect an image to image_input
+2. Select a vision-capable model (auto-detected from Groq API)
+3. Set 'send_system' to 'no' (vision models don't accept system prompts)
+4. Describe what you want to know about the image in user_prompt
+
+Model List:
+- Fetched from Groq API when API key is provided
+- Cached for 5 minutes to reduce API calls
+- Falls back to comprehensive static list if API unavailable
+- Categories help identify model stability and purpose
+- Use ComfyUI Refresh button to update from Groq API
 - Image Input: For Llama-4 Scout vision model only
   * meta-llama/llama-4-scout-17b-16e-instruct
   * Max size: 2048x2048 per dimension
@@ -334,14 +531,20 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             # Store the seed we're using
             cls._last_seed[node_key] = seed
 
-            # Check if model supports vision capabilities
-            is_vision_model = actual_model in cls.VISION_MODELS
+            # Check if model supports vision capabilities (dynamic detection)
+            _, vision_models = _fetch_groq_models(api_key=None)
+            if vision_models is None:
+                vision_models = KNOWN_VISION_MODELS
+            is_vision_model = (
+                actual_model in vision_models or
+                any(pattern in actual_model.lower() for pattern in VISION_PATTERNS)
+            )
 
             # Vision model validation
             if image_input is not None and not is_vision_model:
                 return io.NodeOutput(
                     "",
-                    f"Error: Model '{actual_model}' does not support vision inputs. Only the following Groq models support vision: {', '.join(cls.VISION_MODELS)}",
+                    f"Error: Model '{actual_model}' does not support vision inputs. Vision-capable models are auto-detected from Groq API. Currently known: {', '.join(vision_models)}",
                     help_text
                 )
 

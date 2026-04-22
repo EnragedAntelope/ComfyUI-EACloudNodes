@@ -51,6 +51,16 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 
 #### Features:
 - **ComfyUI v3 compatible** - Enhanced reliability and validation
+- **Dynamic model fetching** - Model list automatically fetched from Groq API (5-min cache)
+- High-speed inference with Groq's optimized hardware
+- Comprehensive model selection including production and preview models
+- Support for vision-capable models (Llama-4 Maverick and Scout)
+- Real-time token usage tracking
+- Automatic retry mechanism with exponential backoff
+- Enhanced input validation
+- Detailed tooltips for all parameters
+- Debug mode for troubleshooting
+- **ComfyUI v3 compatible** - Enhanced reliability and validation
 - High-speed inference with Groq's optimized hardware
 - Comprehensive model selection including production and preview models
 - Support for vision-capable models (Llama-4 Maverick and Scout)
@@ -61,6 +71,10 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - Debug mode for troubleshooting
 
 #### Available Models:
+
+**Note:** Model list is dynamically fetched from Groq API when you provide your API key. Categories below are maintained for reference. Use ComfyUI's Refresh button to update the model list.
+
+**Production Models** (Stable, recommended for production use):
 
 **Production Models** (Stable, recommended for production use):
 - `llama-3.1-8b-instant` - Fast 8B parameter model (560 T/sec)
@@ -76,14 +90,12 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - `groq/compound-mini` - Lightweight agentic system
 
 **Preview Models** (Experimental, for evaluation only):
-- `meta-llama/llama-4-maverick-17b-128e-instruct` - **Vision** (600 T/sec)
 - `meta-llama/llama-4-scout-17b-16e-instruct` - **Vision** (750 T/sec)
 - `meta-llama/llama-prompt-guard-2-22m` - Prompt injection detection
 - `meta-llama/llama-prompt-guard-2-86m` - Enhanced prompt guard
-- `moonshotai/kimi-k2-instruct-0905` - 262K context window (200 T/sec)
 - `openai/gpt-oss-safeguard-20b` - Safety-focused model (1000 T/sec)
-- `playai-tts` - Text-to-speech model
-- `playai-tts-arabic` - Arabic text-to-speech
+- `canopylabs/orpheus-arabic-saudi` - Arabic text-to-speech
+- `canopylabs/orpheus-v1-english` - English text-to-speech
 - `qwen/qwen3-32b` - Qwen 32B model (400 T/sec)
 
 #### Parameters:
@@ -120,6 +132,12 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - `help`: Comprehensive help text with usage information
 
 #### Vision Model Usage:
+1. Select a vision-capable model (auto-detected from Groq API):
+   - `meta-llama/llama-4-scout-17b-16e-instruct` (known vision model)
+   - Other models with 'vision', 'vl', or '-4-' in their ID are auto-detected
+2. Connect an image to the `image_input` parameter
+3. Set `send_system` to "no" (vision models don't accept system prompts)
+4. Describe what you want to know about the image in `user_prompt`
 1. Select a vision-capable model:
    - `meta-llama/llama-4-maverick-17b-128e-instruct`
    - `meta-llama/llama-4-scout-17b-16e-instruct`
