@@ -297,9 +297,6 @@ class OpenrouterNode(io.ComfyNode):
         if model == "Manual Input" and (not manual_model or not manual_model.strip()):
             return "Manual model identifier is required when 'Manual Input' is selected"
 
-        # Validate user prompt
-        if not user_prompt or not user_prompt.strip():
-            return "User prompt is required"
 
         # Validate base URL
         if not base_url or not base_url.strip():
@@ -399,6 +396,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 seed_value = max(0, min(cls.MAX_SAFE_INTEGER, int(seed_value)))
             except (ValueError, TypeError) as e:
                 return io.NodeOutput("", f"Error: Invalid parameter value - {str(e)}", help_text)
+
+            # Validate user prompt (delayed until execute to handle connected inputs)
+            if not user_prompt or not user_prompt.strip():
+                return io.NodeOutput("", "User prompt is required", help_text)
+
 
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model.strip() if model == "Manual Input" else model
