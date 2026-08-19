@@ -52,13 +52,27 @@ AUDIO_MODEL_PATTERNS = ["whisper", "orpheus", "playai-tts", "tts-"]
 # Prefix used for the non-selectable category separators in the model dropdown.
 CATEGORY_SEPARATOR_PREFIX = "---"
 
-# Known vision models (hybrid detection: hardcoded list + pattern matching).
-# Groq's catalogue currently lists no vision-capable chat model - Llama 4 Scout,
-# the last one, has been retired. Detection therefore rests on the patterns below
-# plus whatever the live API reports, so a newly added vision model works without
-# a code change.
-KNOWN_VISION_MODELS = []
-VISION_PATTERNS = ["vision", "vl", "-4-"]  # Patterns for detecting unknown vision models
+# Vision detection is advisory only - it shapes hints, never blocks a request.
+# Order of authority: modality metadata from the live API, then the naming
+# conventions below, then this seed list. Everything here may go stale without
+# breaking anything, because an image is always sent and Groq itself decides.
+KNOWN_VISION_MODELS = [
+    "qwen/qwen3.6-27b",
+]
+
+# Field names Groq has used, or may use, to describe a model's accepted inputs.
+MODALITY_FIELDS = ["input_modalities", "modalities", "supported_modalities"]
+
+VISION_PATTERNS = ["vision", "vl", "multimodal", "omni"]
+
+# Preferred defaults, most wanted first. The first one present in the resolved
+# model list wins; if none survive a Groq reshuffle, the first real model does.
+# This is what keeps a retired default from breaking the node out of the box.
+PREFERRED_DEFAULT_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "groq/compound",
+]
 
 # Static fallback list (used when API unavailable)
 STATIC_FALLBACK_MODELS = [
@@ -81,8 +95,22 @@ STATIC_FALLBACK_MODELS = [
 # MODULE-LEVEL FUNCTIONS (Dynamic Model Fetching)
 # ============================================================================
 
-def _is_audio_model(model_id: str) -> bool:
-    """True for speech-to-text / text-to-speech models, which this node cannot call."""
+def _is_audio_model(model_id: str, model: dict = None) -> bool:
+    """
+    True for speech-to-text / text-to-speech models, which this node cannot call.
+
+    A model entry that positively reports text output is taken at its word, so a
+    future chat model whose name happens to trip a pattern is never excluded.
+    Naming conventions are only the fallback for entries carrying no metadata.
+    """
+    if model:
+        for field in ("output_modalities", "output_modality"):
+            value = model.get(field)
+            if isinstance(value, list) and value:
+                return not any(str(item).lower() == "text" for item in value)
+            if isinstance(value, str) and value:
+                return "text" not in value.lower()
+
     lowered = model_id.lower()
     return any(pattern in lowered for pattern in AUDIO_MODEL_PATTERNS)
 
@@ -118,7 +146,7 @@ def _categorize_groq_models(api_models: list[dict]) -> list[str]:
             continue
 
         # Audio models use different endpoints and cannot be called from this node
-        if _is_audio_model(model_id):
+        if _is_audio_model(model_id, model):
             continue
 
         # Find matching category
@@ -142,29 +170,67 @@ def _categorize_groq_models(api_models: list[dict]) -> list[str]:
     return result
 
 
+def _model_reports_image_input(model: dict):
+    """
+    Read image capability out of a Groq model entry's own metadata.
+
+    Groq has not committed to a modality field, so several plausible names are
+    checked. Returns None when the entry says nothing, which the caller treats
+    as "unknown" rather than "no" - that is what stops this going stale.
+    """
+    for field in MODALITY_FIELDS:
+        value = model.get(field)
+        if isinstance(value, list) and value:
+            return any(str(item).lower() == "image" for item in value)
+        if isinstance(value, str) and value:
+            # e.g. "text+image->text"; only the input side counts
+            return "image" in value.split("->")[0].lower()
+    return None
+
+
 def _detect_vision_models(api_models: list[dict]) -> list[str]:
     """
-    Detect vision-capable models using hybrid approach:
-    1. Include all KNOWN_VISION_MODELS that exist in API response
-    2. Pattern-match model IDs for vision indicators
+    Collect the models that look vision-capable, most authoritative signal first:
+    the entry's own modality metadata, then naming conventions, then the seed list.
+
+    This only feeds hints, so a miss costs a less specific error message rather
+    than a blocked request.
     """
     vision_models = []
-    
+
     for model in api_models:
         model_id = model.get("id", "")
-        if not model_id or not model.get("active", True) or _is_audio_model(model_id):
+        if not model_id or not model.get("active", True) or _is_audio_model(model_id, model):
             continue
 
-        # Check hardcoded list
-        if model_id in KNOWN_VISION_MODELS:
-            vision_models.append(model_id)
+        reported = _model_reports_image_input(model)
+        if reported is not None:
+            if reported:
+                vision_models.append(model_id)
             continue
-        
-        # Pattern matching
-        if any(pattern in model_id.lower() for pattern in VISION_PATTERNS):
+
+        if (model_id in KNOWN_VISION_MODELS or
+                any(pattern in model_id.lower() for pattern in VISION_PATTERNS)):
             vision_models.append(model_id)
-    
+
     return vision_models
+
+
+def _pick_default_model(models: list[str]) -> str:
+    """
+    Choose a default that exists in the given list.
+
+    Groq retires models regularly - a hardcoded default that disappears makes the
+    node fail on a fresh drop-in, so fall back through preferences and then to
+    whatever the list actually offers.
+    """
+    for preferred in PREFERRED_DEFAULT_MODELS:
+        if preferred in models:
+            return preferred
+    for model_id in models:
+        if not _is_category_separator(model_id) and model_id != "Manual Input":
+            return model_id
+    return "Manual Input"
 
 
 def _fetch_groq_models(api_key: str = None) -> tuple[list[str], list[str]]:
@@ -252,6 +318,11 @@ class GroqNode(io.ComfyNode):
 
     @classmethod
     def define_schema(cls) -> io.Schema:
+        # Resolved together so the default is always one of the offered options,
+        # whatever Groq's catalogue looks like on the day.
+        model_options = _fetch_groq_models(api_key=None)[0]
+        default_model = _pick_default_model(model_options)
+
         return io.Schema(
             node_id="GroqNode",
             display_name="Groq Chat",
@@ -266,8 +337,8 @@ class GroqNode(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "model",
-                options=_fetch_groq_models(api_key=None)[0],
-                    default="openai/gpt-oss-120b",
+                    options=model_options,
+                    default=default_model,
                 tooltip="Select a Groq model or choose 'Manual Input'. Categories: Featured, Production (stable), Preview (evaluation). Use ComfyUI Refresh to update model list from Groq API."
                 ),
                 io.String.Input(
@@ -371,7 +442,7 @@ class GroqNode(io.ComfyNode):
                 io.Image.Input(
                     "image_input",
                     optional=True,
-                    tooltip="Optional image input for vision-capable models. Note: Groq's catalogue currently lists no vision-capable chat model, so this input has nothing to talk to unless Groq adds one back or you enter one via 'Manual Input'. Maximum size: 2048x2048 (only the first image of a batch is sent)."
+                    tooltip="Optional image input for vision-capable models (qwen/qwen3.6-27b at time of writing). The image is always sent and Groq decides whether the model accepts it, so newly released vision models work without updating this node. Maximum size: 2048x2048 (only the first image of a batch is sent)."
                 ),
                 io.String.Input(
                     "additional_params",
@@ -500,11 +571,11 @@ Key Settings:
 - Debug Mode: include the request body in 400-error messages
 
 Optional:
-- Image Input: for vision-capable models
-  * Groq's catalogue currently lists NO vision-capable chat model (Llama 4 Scout,
-    the last one, has been retired), so this input has nothing to talk to today
-  * Capable models are picked up automatically from the live API, and from ids
-    containing 'vision', 'vl', or '-4-', so a new one works without a code change
+- Image Input: for vision-capable models (qwen/qwen3.6-27b at time of writing)
+  * An attached image is ALWAYS sent. This node does not second-guess which
+    models accept images - Groq decides, so a vision model released after this
+    node shipped works immediately, with no update here
+  * If Groq refuses it, the error carries a hint about what did look capable
   * Max size: 2048x2048 per dimension; only the first image of a batch is sent
 - Additional Params: extra Groq parameters as a JSON object, merged into the
   request body (it overrides the widgets above on key collisions)
@@ -580,28 +651,33 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 cls._last_seed.clear()
             cls._last_seed[node_key] = seed
 
-            # Check if model supports vision capabilities.
-            # Passing the key here is what warms the module cache, so a later ComfyUI
-            # Refresh can rebuild the dropdown from the live Groq model list.
+            # Warm the module cache so a later ComfyUI Refresh can rebuild the
+            # dropdown from the live Groq model list.
             _, vision_models = _fetch_groq_models(api_key=api_key)
             if vision_models is None:
                 vision_models = KNOWN_VISION_MODELS
+
+            # Deliberately NOT a gate. Refusing an image on the strength of a
+            # capability list means every Groq model reshuffle silently blocks a
+            # model that actually works. The image is always sent; Groq rejects it
+            # if the model cannot take it, and that 400 is annotated below with
+            # whichever models did look capable at the time.
             is_vision_model = (
                 actual_model in vision_models or
                 any(pattern in actual_model.lower() for pattern in VISION_PATTERNS)
             )
 
-            # Vision model validation
+            # Appended to a 400 when an image was attached to a model that did not
+            # look vision-capable, turning Groq's generic complaint into a lead.
+            vision_hint = ""
             if image_input is not None and not is_vision_model:
-                if vision_models:
-                    known = f"Vision-capable models currently offered by Groq: {', '.join(vision_models)}."
-                else:
-                    known = ("Groq's catalogue currently lists no vision-capable chat model, "
-                             "so there is no model here that can accept an image.")
-                return io.NodeOutput(
-                    "",
-                    f"Error: Model '{actual_model}' does not support vision inputs. {known}",
-                    help_text
+                capable = [m for m in vision_models if not _is_category_separator(m)]
+                vision_hint = (
+                    f"\n\nHint: an image was attached and '{actual_model}' did not look "
+                    "vision-capable. "
+                    + (f"Models that currently do: {', '.join(capable)}."
+                       if capable else
+                       "No model in the current list advertises image input.")
                 )
 
             # Initialize messages list
@@ -614,8 +690,9 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     "content": system_prompt
                 })
 
-            # Handle different message formats based on whether it's a vision model with image
-            if image_input is not None and is_vision_model:
+            # An attached image is always forwarded. Choosing the text-only shape
+            # here on a capability guess would silently drop the user's image.
+            if image_input is not None:
                 try:
                     # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
@@ -741,11 +818,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                             if debug_mode == "on":
                                 return io.NodeOutput(
                                     "",
-                                    f"Error 400: {error_message}\n\nRequest body:\n{json.dumps(body, indent=2)}",
+                                    f"Error 400: {error_message}{vision_hint}\n\nRequest body:\n{json.dumps(body, indent=2)}",
                                     help_text
                                 )
                             else:
-                                return io.NodeOutput("", f"Error 400: {error_message}", help_text)
+                                return io.NodeOutput("", f"Error 400: {error_message}{vision_hint}", help_text)
                         except Exception:
                             return io.NodeOutput(
                                 "",

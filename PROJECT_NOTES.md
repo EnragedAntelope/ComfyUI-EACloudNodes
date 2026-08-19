@@ -2,6 +2,29 @@
 
 ### v2.1.0 - Repository Audit
 
+**Designed for model churn.** Both providers rotate models constantly, so the
+capability logic was reworked to stop depending on hardcoded ids:
+
+- *Nothing is refused on a guess.* The Groq node used to reject an attached image
+  when the selected model was not in `KNOWN_VISION_MODELS`. That list is a snapshot,
+  so every Groq reshuffle would block a model that actually works — and the message
+  construction then took the text-only branch, meaning a stale list could silently
+  drop the user's image. The image is now always sent; Groq decides, and its 400 is
+  annotated with whatever did look capable.
+- *Metadata outranks names.* Vision detection, Groq's audio exclusion, and
+  OpenRouter's non-chat filter all read modality metadata first and fall back to
+  naming conventions only when an entry carries none. A model whose name trips a
+  heuristic stays listed if the API says it emits text. Absent metadata means
+  "unknown", never "unsupported".
+- *The default heals itself.* `PREFERRED_DEFAULT_MODELS` is walked against the list
+  that actually loaded, falling back to the first real entry, so a retired default
+  cannot break the node on a fresh drop-in the way `llama-3.3-70b-versatile` did.
+- *Unrecognised models are surfaced, not hidden.* Anything outside the curated
+  categories lands under `--- Other ---`.
+
+`tests/test_package.py` simulates a wholesale catalogue reshuffle with invented
+vendor names to keep these paths honest.
+
 **Groq model list refreshed against the current catalogue.** Three of the models the
 node offered no longer exist, including the one it shipped as the default:
 
@@ -18,13 +41,17 @@ node offered no longer exist, including the one it shipped as the default:
 Added: `minimaxai/minimax-m2.7`, `qwen/qwen3.6-27b`. The default is now
 `openai/gpt-oss-120b`.
 
-Consequence worth flagging: **Groq currently offers no vision-capable chat model at
-all.** `KNOWN_VISION_MODELS` is therefore empty and vision detection rests entirely on
-the `VISION_PATTERNS` name heuristics, so a future Groq vision model works through
-`Manual Input` with no code change. Until then the Groq node's `image_input` has
-nothing to talk to, and the tooltip, help text, and README say so; the rejection
-message no longer trails off into an empty "Currently known: " list. Use the
-OpenRouter Chat node for vision work in the meantime.
+`qwen/qwen3.6-27b` is multimodal and is the node's current vision model. Its id
+matches none of the name heuristics, which is precisely why capability is no longer
+decided from a name or a hardcoded list — see the churn notes above.
+
+**OpenRouter's free dropdown was listing models that cannot chat.** The free filter
+tested pricing alone, and embedding, reranking and text-to-speech models are all
+priced at $0. Of the 23 entries in OpenRouter's current free listing, six are
+non-chat: two embedding models, one reranker, and three speech models. Worse, one of
+them (`llama-nemotron-embed-vl-1b-v2`) contains `-vl`, so the vision detector was
+flagging an *embedding* model as vision-capable. Free models are now filtered on
+output modality, with naming conventions as the fallback.
 
 An end-to-end audit of the three nodes against the current Groq and OpenRouter APIs,
 checking that every widget does what its tooltip claims. Each defect below was

@@ -112,3 +112,132 @@ def test_pyproject_version_is_semver():
     number = version.split("=")[1].strip().strip('"')
     parts = number.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts), number
+
+
+# --------------------------------------------------------------------------
+# Resilience to provider catalogue churn
+#
+# Groq and OpenRouter retire and rename models constantly. These tests simulate
+# that churn so the pack keeps working without an edit here.
+# --------------------------------------------------------------------------
+
+def test_groq_default_survives_its_preferred_models_being_retired(monkeypatch):
+    """The shipped default vanishing is what broke this node once already."""
+    survivors = ["--- Other ---", "groq/something-nobody-predicted", "Manual Input"]
+    monkeypatch.setattr(groq_node, "STATIC_FALLBACK_MODELS", survivors)
+
+    schema = groq_node.GroqNode.define_schema()
+    model_input = schema.input_by_id("model")
+    assert model_input.default == "groq/something-nobody-predicted"
+    assert model_input.default in model_input.options
+
+
+def test_groq_default_never_lands_on_a_separator_or_manual_input(monkeypatch):
+    for listing in (
+        ["--- Other ---", "a/model", "Manual Input"],
+        ["a/model", "Manual Input"],
+        ["--- Other ---", "Manual Input"],
+        ["Manual Input"],
+    ):
+        monkeypatch.setattr(groq_node, "STATIC_FALLBACK_MODELS", listing)
+        default = groq_node.GroqNode.define_schema().input_by_id("model").default
+        assert not default.startswith("---")
+        assert default in listing
+
+
+def test_groq_default_prefers_the_first_available_preference(monkeypatch):
+    second = groq_node.PREFERRED_DEFAULT_MODELS[1]
+    monkeypatch.setattr(groq_node, "STATIC_FALLBACK_MODELS", [second, "z/other", "Manual Input"])
+    assert groq_node.GroqNode.define_schema().input_by_id("model").default == second
+
+
+def test_a_wholly_unfamiliar_groq_catalogue_still_yields_a_usable_dropdown(monkeypatch):
+    """Every id here is invented; none match any constant in the module."""
+    payload = {"data": [
+        {"id": "vendor-x/thing-1", "active": True},
+        {"id": "vendor-y/thing-2", "active": True},
+        {"id": "vendor-z/speech-tts-1", "active": True},
+    ]}
+    monkeypatch.setattr(groq_node.requests, "get",
+                        lambda *a, **k: _Response(200, payload))
+    models, _ = groq_node._fetch_groq_models(api_key="key")
+
+    offered = [m for m in models if not m.startswith("---") and m != "Manual Input"]
+    assert offered == ["vendor-x/thing-1", "vendor-y/thing-2"]  # tts excluded
+    assert _pick(models) in offered
+
+
+def test_a_wholly_unfamiliar_openrouter_catalogue_still_filters_correctly(monkeypatch):
+    """Only pricing and modality decide; no model name is known in advance."""
+    payload = {"data": [
+        {"id": "vendor-a/chat-1", "pricing": {"prompt": "0", "completion": "0"},
+         "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}},
+        {"id": "vendor-b/speaks-1", "pricing": {"prompt": "0", "completion": "0"},
+         "architecture": {"input_modalities": ["text"], "output_modalities": ["audio"]}},
+        {"id": "vendor-c/sees-1", "pricing": {"prompt": "0", "completion": "0"},
+         "architecture": {"input_modalities": ["text", "image"], "output_modalities": ["text"]}},
+        {"id": "vendor-d/costs-1", "pricing": {"prompt": "0.01", "completion": "0.01"},
+         "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}},
+    ]}
+    monkeypatch.setattr(openrouter.requests, "get", lambda *a, **k: _Response(200, payload))
+
+    free, vision = openrouter._fetch_openrouter_free_models()
+    assert free == ["vendor-a/chat-1", "vendor-c/sees-1", "Manual Input"]
+    assert "vendor-b/speaks-1" not in free      # emits audio, cannot chat
+    assert "vendor-c/sees-1" in vision          # capability from metadata alone
+    assert "vendor-d/costs-1" not in free       # priced
+
+
+class _Response:
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _pick(models):
+    return groq_node._pick_default_model(models)
+
+
+def test_metadata_outranks_naming_conventions_in_both_nodes():
+    """
+    A future chat model whose name happens to trip a heuristic must not be
+    hidden. Affirmative modality metadata always wins over the name backstop.
+    """
+    # Groq: an id containing "tts" that the API says emits text
+    assert groq_node._is_audio_model("acme/tts-reasoning-chat") is True   # name only
+    assert groq_node._is_audio_model(
+        "acme/tts-reasoning-chat", {"output_modalities": ["text"]}) is False
+
+    # OpenRouter: an id containing "embed" that the API says emits text
+    assert openrouter._model_supports_chat({"id": "acme/embedded-reasoner"}) is False
+    assert openrouter._model_supports_chat({
+        "id": "acme/embedded-reasoner",
+        "architecture": {"output_modalities": ["text"]}}) is True
+
+
+def test_name_heuristics_still_apply_without_metadata():
+    assert groq_node._is_audio_model("openai/whisper-large-v9", {}) is True
+    assert groq_node._is_audio_model("openai/gpt-oss-999b", {}) is False
+    assert openrouter._model_supports_chat({"id": "x/nemotron-embed-1b"}) is False
+    assert openrouter._model_supports_chat({"id": "x/plain-chat"}) is True
+
+
+def test_no_provider_lookup_happens_at_import_time():
+    """
+    define_schema() may call out; importing the modules must not. A pack that
+    blocks on a provider outage at import time takes ComfyUI's startup with it.
+    """
+    import ast
+
+    for module in (groq_node, openrouter, openrouter_models):
+        tree = ast.parse(open(module.__file__).read())
+        # Only module-level statements run at import; skip function and class bodies.
+        toplevel = [n for n in tree.body
+                    if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+        for node in toplevel:
+            for call in (n for n in ast.walk(node) if isinstance(n, ast.Call)):
+                name = ast.unparse(call.func)
+                assert "requests" not in name, f"{module.__name__} calls {name} at import"

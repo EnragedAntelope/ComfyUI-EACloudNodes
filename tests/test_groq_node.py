@@ -90,24 +90,51 @@ def test_execute_warms_the_model_cache(monkeypatch, groq_call):
 
 def test_vision_detection_ignores_inactive_and_audio_models():
     detected = groq_node._detect_vision_models([
-        {"id": "meta-llama/llama-4-scout-17b-16e-instruct", "active": True},
         {"id": "some-vl-model", "active": True},
         {"id": "openai/gpt-oss-120b", "active": True},
         {"id": "hidden-vision-model", "active": False},
+        {"id": "whisper-large-v3", "active": True},
     ])
-    assert "meta-llama/llama-4-scout-17b-16e-instruct" in detected
     assert "some-vl-model" in detected
     assert "openai/gpt-oss-120b" not in detected
     assert "hidden-vision-model" not in detected
+    assert "whisper-large-v3" not in detected
 
 
-def test_vision_support_survives_an_empty_known_list(groq_call):
-    """
-    Groq retired its last vision model, so KNOWN_VISION_MODELS is empty and the
-    name patterns are the only thing keeping the image input usable. A future
-    vision model must work through 'Manual Input' with no code change.
-    """
-    assert groq_node.KNOWN_VISION_MODELS == []
+@pytest.mark.parametrize("entry,expected", [
+    ({"input_modalities": ["text", "image"]}, True),
+    ({"input_modalities": ["text"]}, False),
+    ({"modalities": ["text", "image"]}, True),
+    ({"supported_modalities": ["text"]}, False),
+    ({"modalities": "text+image->text"}, True),
+    ({"modalities": "text->text"}, False),
+    ({}, None),
+])
+def test_modality_metadata_is_read_when_present(entry, expected):
+    """If Groq ever publishes modality data, it must outrank the name heuristics."""
+    assert groq_node._model_reports_image_input(entry) is expected
+
+
+def test_api_metadata_outranks_the_seed_list():
+    """A seeded model the API says is text-only must not stay on the vision list."""
+    seeded = groq_node.KNOWN_VISION_MODELS[0]
+    detected = groq_node._detect_vision_models([
+        {"id": seeded, "active": True, "input_modalities": ["text"]},
+        {"id": "brand/new-model", "active": True, "input_modalities": ["text", "image"]},
+    ])
+    assert seeded not in detected
+    assert "brand/new-model" in detected      # unknown name, but the API vouched for it
+
+
+def test_known_vision_models_are_offered_in_the_dropdown():
+    """A vision model users cannot select is no use; keep the two lists in step."""
+    options = _model_options()
+    for model_id in groq_node.KNOWN_VISION_MODELS:
+        assert model_id in options, model_id
+
+
+def test_a_pattern_matching_model_is_treated_as_vision(groq_call):
+    """A new vision model must work through 'Manual Input' with no code change."""
     out = groq_call(model="Manual Input", manual_model="groq/some-new-vision-model",
                     send_system="no", image_input=torch.rand(1, 16, 16, 3))
     assert out.args[0] == "hello"
@@ -286,7 +313,7 @@ def test_seed_counter_dict_is_bounded(groq_call):
 # Images
 # --------------------------------------------------------------------------
 
-VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+VISION_MODEL = "qwen/qwen3.6-27b"  # Groq's current multimodal chat model
 
 
 def _image_content(call):
@@ -318,17 +345,51 @@ def test_oversized_image_is_rejected(groq_call):
     assert groq_call.calls["calls"] == []
 
 
-def test_image_on_a_text_only_model_is_rejected(groq_call):
-    out = groq_call(model="openai/gpt-oss-120b", image_input=torch.rand(1, 32, 32, 3))
-    assert "does not support vision" in out.args[1]
-    assert groq_call.calls["calls"] == []
+def test_an_image_is_never_silently_dropped(groq_call):
+    """
+    The node must not decide from a capability list that an image should not be
+    sent. A stale list would otherwise drop the user's image without a word.
+    """
+    out = groq_call(model="a-model-nothing-knows-about",
+                    image_input=torch.rand(1, 32, 32, 3))
+    assert out.args[0] == "hello"
+    content = _image_content(groq_call.calls["calls"][0])
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
-def test_rejection_reads_cleanly_when_no_vision_model_is_offered(groq_call):
-    """The old message ended in a dangling 'Currently known: ' with an empty list."""
-    out = groq_call(model="openai/gpt-oss-120b", image_input=torch.rand(1, 32, 32, 3))
-    assert "lists no vision-capable chat model" in out.args[1]
+def test_an_unlisted_vision_model_is_not_blocked(groq_call):
+    """
+    A Groq vision model released after this code shipped must work with no edit
+    here. Blocking on KNOWN_VISION_MODELS is what used to prevent that.
+    """
+    out = groq_call(model="Manual Input", manual_model="groq/model-from-the-future",
+                    send_system="no", image_input=torch.rand(1, 16, 16, 3))
+    assert out.args[0] == "hello"
+    assert groq_call.calls["calls"][0]["body"]["model"] == "groq/model-from-the-future"
+
+
+def test_groq_400_on_an_image_gains_a_hint(groq_call):
+    """Groq stays the authority on capability; we only make its refusal actionable."""
+    out = groq_call(responses=[FakeResponse(400, {"error": {"message": "no image support"}})],
+                    model="openai/gpt-oss-120b", image_input=torch.rand(1, 32, 32, 3))
+    assert "no image support" in out.args[1]
+    assert "did not look vision-capable" in out.args[1]
+    assert "qwen/qwen3.6-27b" in out.args[1]
+
+
+def test_the_hint_reads_cleanly_when_nothing_looks_capable(groq_call, monkeypatch):
+    """Groq has emptied its vision line-up before, when Llama 4 Scout was retired."""
+    monkeypatch.setattr(groq_node, "KNOWN_VISION_MODELS", [])
+    out = groq_call(responses=[FakeResponse(400, {"error": {"message": "nope"}})],
+                    model="openai/gpt-oss-120b", image_input=torch.rand(1, 32, 32, 3))
+    assert "No model in the current list advertises image input." in out.args[1]
     assert not out.args[1].rstrip().endswith(":")
+
+
+def test_no_hint_when_the_model_looks_capable(groq_call):
+    out = groq_call(responses=[FakeResponse(400, {"error": {"message": "rate limited"}})],
+                    model=VISION_MODEL, image_input=torch.rand(1, 32, 32, 3))
+    assert "did not look vision-capable" not in out.args[1]
 
 
 def test_out_of_range_pixels_do_not_crash_conversion(groq_call):

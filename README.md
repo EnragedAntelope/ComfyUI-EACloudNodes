@@ -83,7 +83,7 @@ Rows shown as `--- Category ---` are group labels, not selectable models.
 **Preview: Chat** (experimental, may be discontinued at short notice):
 - `minimaxai/minimax-m2.7` - 196K context, 131K max completion
 - `openai/gpt-oss-safeguard-20b` - Safety-focused reasoning model
-- `qwen/qwen3.6-27b` - 131K context, accepts files up to 20 MB
+- `qwen/qwen3.6-27b` - **Vision**, 131K context, accepts files up to 20 MB
 
 > **Not offered in the dropdown:**
 > - Groq's speech models (Whisper, Orpheus) are served by `/audio/transcriptions`
@@ -128,18 +128,17 @@ Rows shown as `--- Category ---` are group labels, not selectable models.
 
 #### Vision Model Usage:
 
-> ⚠️ **Groq's catalogue currently lists no vision-capable chat model.** Llama 4
-> Scout, the last one, has been retired. The `image_input` on this node therefore
-> has nothing to talk to right now — use the **OpenRouter Chat** node for vision
-> work until Groq adds one back.
-
-When Groq does offer one again, no code change is needed:
-
-1. Select the vision-capable model (from the dropdown, or via `Manual Input`).
-   Models with `vision`, `vl`, or `-4-` in their ID are auto-detected.
+1. Select a vision-capable model — `qwen/qwen3.6-27b` at time of writing, or any
+   other via `Manual Input`
 2. Connect an image to the `image_input` parameter
 3. Set `send_system` to "no" (vision models often reject system prompts)
 4. Describe what you want to know about the image in `user_prompt`
+
+**An attached image is always sent.** The node does not refuse a request based on
+its own idea of which models accept images — that check would go stale every time
+Groq reshuffles its line-up and would block models that actually work. Groq is the
+authority; if it refuses the image, the error comes back with a hint naming the
+models that did look capable.
 
 Images are capped at 2048 pixels per dimension, and only the first image of a
 batch is sent.
@@ -309,12 +308,19 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
     have been retired by Groq. The default is now `openai/gpt-oss-120b`; before
     this change the node failed out of the box.
   - `meta-llama/llama-4-scout-17b-16e-instruct` and `qwen/qwen3-32b` are gone
-  - Added `minimaxai/minimax-m2.7` and `qwen/qwen3.6-27b`
-  - Groq no longer offers **any** vision-capable chat model, so `KNOWN_VISION_MODELS`
-    is empty and vision detection now rests entirely on the name patterns — a future
-    vision model works with no code change
+  - Added `minimaxai/minimax-m2.7` and `qwen/qwen3.6-27b` (the current vision model)
   - The `llama-prompt-guard-2-*` classifiers left the curated dropdown (512-token
     safety classifiers, not chat models); still reachable via `Manual Input`
+- **Built to absorb model churn** (see *Keeping up with model churn* above)
+  - An attached image is always sent; the node no longer refuses one on the
+    strength of its own capability list, which also fixes a path where a stale
+    list would have silently dropped the image instead of sending it
+  - Modality metadata outranks name heuristics everywhere, in both directions
+  - The default model is resolved against the list that actually loaded, so a
+    retired default can no longer break the node on a fresh drop-in
+  - OpenRouter: embedding, reranking and speech models are filtered out of the
+    free dropdown — they are priced at $0 and so passed a pricing-only test
+    straight into a chat model list
 - **Correctness**
   - Groq: send `max_completion_tokens` instead of the deprecated `max_tokens`
   - Groq: dropped Whisper/Orpheus from the chat dropdown — they are served by the
@@ -409,6 +415,28 @@ These nodes require `comfy_api.latest`, which ships with current ComfyUI builds.
 - **OpenRouter**: Multi-provider aggregation API
 - Both support standard OpenAI message format
 - Vision models use base64-encoded images in message content
+
+## Keeping up with model churn
+
+Groq and OpenRouter change their line-ups constantly, so the nodes are built to
+absorb that without edits here. The rule throughout: **provider metadata decides,
+hardcoded names are only a fallback, and nothing is refused on a guess.**
+
+| Concern | How it self-heals |
+| --- | --- |
+| New model released | Appears in the dropdown on the next Refresh. Anything the pack does not recognise is listed under `--- Other ---` rather than hidden. |
+| Default model retired | The default is resolved against the list that actually loaded, walking a preference order and then falling back to the first real entry. A retired default can no longer break the node on a fresh drop-in. |
+| New vision model | Works immediately. An attached image is always sent and the provider decides — the node never refuses one from its own capability list. |
+| A model's name trips a heuristic | Affirmative modality metadata always wins. A chat model called `…-tts-…` or `…-embed-…` stays listed if the API says it emits text. |
+| Provider adds modality fields | Read automatically. Several plausible field names are checked, and an entry that reports nothing is treated as "unknown", never as "unsupported". |
+| Provider is unreachable | Groq falls back to a static list and backs off for 60s. OpenRouter offers `Manual Input`, which reaches any model id. |
+
+The one genuinely time-sensitive thing in the repo is Groq's `STATIC_FALLBACK_MODELS`,
+used only when no API key has been supplied yet. A stale entry there costs a clear
+error from Groq, not a broken node.
+
+`tests/test_package.py` simulates a wholesale catalogue reshuffle — invented vendors,
+unfamiliar ids, retired defaults — to check these paths keep working.
 
 ## Development
 

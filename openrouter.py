@@ -28,6 +28,39 @@ _openrouter_model_cache = {
 }
 
 
+# Embedding, reranking and speech models are priced at $0 and so pass a
+# pricing-only "free" test, but none of them can answer a chat completion.
+NON_CHAT_NAME_PATTERNS = ["embed", "rerank", "-tts", "tts-", "/tts", "-stt", "whisper"]
+
+
+def _model_supports_chat(model: dict) -> bool:
+    """
+    True when a catalogue entry looks like a chat model.
+
+    Judged on output modality first (a chat model emits text; a TTS model emits
+    audio), then on the naming conventions used for embedding and reranking
+    models. Entries carrying no modality metadata are kept rather than dropped,
+    so an unfamiliar shape never silently hides a usable model.
+    """
+    arch = model.get("architecture") or {}
+
+    output_modalities = arch.get("output_modalities")
+    if isinstance(output_modalities, list) and output_modalities:
+        # Metadata is authoritative in both directions: a model that says it
+        # emits text is a chat model even if its name looks like something else.
+        return any(str(m).lower() == "text" for m in output_modalities)
+
+    modality = str(arch.get("modality") or "")
+    if "->" in modality:
+        outputs = modality.split("->", 1)[1].lower()
+        if outputs:
+            return "text" in outputs
+
+    # No modality metadata: fall back on naming conventions.
+    haystack = f"{model.get('id', '')} {model.get('name', '')}".lower()
+    return not any(pattern in haystack for pattern in NON_CHAT_NAME_PATTERNS)
+
+
 def _model_accepts_images(model: dict) -> bool:
     """
     Decide whether an OpenRouter model entry accepts image input.
@@ -87,6 +120,11 @@ def _fetch_openrouter_free_models():
         for model in data:
             model_id = model.get("id", "")
             if not model_id:
+                continue
+
+            # Embeddings, rerankers and TTS models are $0 and would otherwise pass
+            # the pricing-only "free" test straight into a chat dropdown.
+            if not _model_supports_chat(model):
                 continue
 
             known_models.append(model_id)
@@ -170,7 +208,7 @@ class OpenrouterNode(io.ComfyNode):
                     "model",
                     options=models,
                     default=default_model,
-                    tooltip="Select a free OpenRouter model or choose 'Manual Input' for custom models. Models with 'vision' or 'vl' support image inputs. Use ComfyUI's Refresh to update this list from OpenRouter's API."
+                    tooltip="Select a free OpenRouter chat model, or choose 'Manual Input' for a paid or custom one. The list is fetched live from OpenRouter and excludes embedding, reranking and speech models, which cannot answer a chat request. Use ComfyUI's Refresh to update it."
                 ),
                 io.String.Input(
                     "manual_model",
