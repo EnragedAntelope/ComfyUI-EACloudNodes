@@ -30,18 +30,18 @@ _groq_model_cache = {
 }
 
 # Model categorization mapping (hybrid approach - applied to fetched models)
+# Curated chat-capable models, mirroring Groq's own Production/Preview grouping.
+# Audio models are excluded because this node cannot call them at all; the
+# prompt-guard classifiers are excluded because a 512-token safety classifier is
+# not useful as a chat model here (they remain reachable via 'Manual Input').
 MODEL_CATEGORIES = {
     "Featured": ["groq/compound", "openai/gpt-oss-120b"],
-    "Production: Chat": ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
+    "Production: Chat": ["openai/gpt-oss-20b"],
     "Production: Systems": ["groq/compound-mini"],
     "Preview: Chat": [
-        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "minimaxai/minimax-m2.7",
         "openai/gpt-oss-safeguard-20b",
-        "qwen/qwen3-32b",
-    ],
-    "Preview: Safety": [
-        "meta-llama/llama-prompt-guard-2-22m",
-        "meta-llama/llama-prompt-guard-2-86m",
+        "qwen/qwen3.6-27b",
     ],
 }
 
@@ -52,10 +52,12 @@ AUDIO_MODEL_PATTERNS = ["whisper", "orpheus", "playai-tts", "tts-"]
 # Prefix used for the non-selectable category separators in the model dropdown.
 CATEGORY_SEPARATOR_PREFIX = "---"
 
-# Known vision models (hybrid detection: hardcoded list + pattern matching)
-KNOWN_VISION_MODELS = [
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-]
+# Known vision models (hybrid detection: hardcoded list + pattern matching).
+# Groq's catalogue currently lists no vision-capable chat model - Llama 4 Scout,
+# the last one, has been retired. Detection therefore rests on the patterns below
+# plus whatever the live API reports, so a newly added vision model works without
+# a code change.
+KNOWN_VISION_MODELS = []
 VISION_PATTERNS = ["vision", "vl", "-4-"]  # Patterns for detecting unknown vision models
 
 # Static fallback list (used when API unavailable)
@@ -64,18 +66,13 @@ STATIC_FALLBACK_MODELS = [
     "groq/compound",
     "openai/gpt-oss-120b",
     "--- Production: Chat ---",
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
     "openai/gpt-oss-20b",
     "--- Production: Systems ---",
     "groq/compound-mini",
     "--- Preview: Chat ---",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "minimaxai/minimax-m2.7",
     "openai/gpt-oss-safeguard-20b",
-    "qwen/qwen3-32b",
-    "--- Preview: Safety ---",
-    "meta-llama/llama-prompt-guard-2-22m",
-    "meta-llama/llama-prompt-guard-2-86m",
+    "qwen/qwen3.6-27b",
     "Manual Input",
 ]
 
@@ -270,7 +267,7 @@ class GroqNode(io.ComfyNode):
                 io.Combo.Input(
                     "model",
                 options=_fetch_groq_models(api_key=None)[0],
-                    default="llama-3.3-70b-versatile",
+                    default="openai/gpt-oss-120b",
                 tooltip="Select a Groq model or choose 'Manual Input'. Categories: Featured, Production (stable), Preview (evaluation). Use ComfyUI Refresh to update model list from Groq API."
                 ),
                 io.String.Input(
@@ -295,7 +292,7 @@ class GroqNode(io.ComfyNode):
                     "send_system",
                     options=["yes", "no"],
                     default="yes",
-                    tooltip="Toggle system prompt sending. Set to 'no' for vision models that don't accept system prompts (e.g., Llama-4 vision models)."
+                    tooltip="Toggle system prompt sending. Set to 'no' for models that reject system prompts, which is common for vision models."
                 ),
                 io.Float.Input(
                     "temperature",
@@ -374,7 +371,7 @@ class GroqNode(io.ComfyNode):
                 io.Image.Input(
                     "image_input",
                     optional=True,
-                    tooltip="Optional image input for vision-capable models. Currently supported: meta-llama/llama-4-scout-17b-16e-instruct. Maximum size: 2048x2048."
+                    tooltip="Optional image input for vision-capable models. Note: Groq's catalogue currently lists no vision-capable chat model, so this input has nothing to talk to unless Groq adds one back or you enter one via 'Manual Input'. Maximum size: 2048x2048 (only the first image of a batch is sent)."
                 ),
                 io.String.Input(
                     "additional_params",
@@ -479,12 +476,14 @@ Key Settings:
 - API Key: Get from https://console.groq.com/keys
   * Also used to refresh the model list from the Groq API
 - Model: Pick from the dropdown or choose 'Manual Input'
-  * Featured: groq/compound, openai/gpt-oss-120b
-  * Production: stable models (llama-3.3-70b-versatile is the default)
+  * Featured: groq/compound, openai/gpt-oss-120b (default)
+  * Production: stable models (openai/gpt-oss-120b is the default)
   * Preview: experimental models, may be deprecated without notice
   * Rows shown as '--- Category ---' are labels, not selectable models
-  * Speech models (Whisper, Orpheus) are excluded: they use Groq's audio
-    endpoints, not chat completions
+  * Speech models (Whisper, Orpheus) are excluded and rejected if entered:
+    they use Groq's audio endpoints, not chat completions
+  * The prompt-guard safety classifiers are left out of the curated list too
+    (512-token classifiers); reach them with 'Manual Input' if you need them
 - Manual Model: custom model id, used only when 'Manual Input' is selected
 - System Prompt: sets AI behavior/context
 - User Prompt: main input for the model (required)
@@ -502,8 +501,10 @@ Key Settings:
 
 Optional:
 - Image Input: for vision-capable models
-  * Known: meta-llama/llama-4-scout-17b-16e-instruct
-  * Also detected from model ids containing 'vision', 'vl', or '-4-'
+  * Groq's catalogue currently lists NO vision-capable chat model (Llama 4 Scout,
+    the last one, has been retired), so this input has nothing to talk to today
+  * Capable models are picked up automatically from the live API, and from ids
+    containing 'vision', 'vl', or '-4-', so a new one works without a code change
   * Max size: 2048x2048 per dimension; only the first image of a batch is sent
 - Additional Params: extra Groq parameters as a JSON object, merged into the
   request body (it overrides the widgets above on key collisions)
@@ -592,9 +593,14 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
 
             # Vision model validation
             if image_input is not None and not is_vision_model:
+                if vision_models:
+                    known = f"Vision-capable models currently offered by Groq: {', '.join(vision_models)}."
+                else:
+                    known = ("Groq's catalogue currently lists no vision-capable chat model, "
+                             "so there is no model here that can accept an image.")
                 return io.NodeOutput(
                     "",
-                    f"Error: Model '{actual_model}' does not support vision inputs. Vision-capable models are auto-detected from Groq API. Currently known: {', '.join(vision_models)}",
+                    f"Error: Model '{actual_model}' does not support vision inputs. {known}",
                     help_text
                 )
 

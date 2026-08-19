@@ -2,6 +2,30 @@
 
 ### v2.1.0 - Repository Audit
 
+**Groq model list refreshed against the current catalogue.** Three of the models the
+node offered no longer exist, including the one it shipped as the default:
+
+| Removed | Reason |
+| --- | --- |
+| `llama-3.3-70b-versatile` | retired by Groq — **was the node's default**, so the node failed out of the box |
+| `llama-3.1-8b-instant` | retired by Groq |
+| `meta-llama/llama-4-scout-17b-16e-instruct` | retired — was the *only* entry in `KNOWN_VISION_MODELS` |
+| `qwen/qwen3-32b` | superseded by `qwen/qwen3.6-27b` |
+| `whisper-large-v3`, `whisper-large-v3-turbo` | audio endpoints, never callable here |
+| `canopylabs/orpheus-*` | audio endpoints, never callable here |
+| `meta-llama/llama-prompt-guard-2-*` | 512-token safety classifiers, not chat models — still reachable via `Manual Input` |
+
+Added: `minimaxai/minimax-m2.7`, `qwen/qwen3.6-27b`. The default is now
+`openai/gpt-oss-120b`.
+
+Consequence worth flagging: **Groq currently offers no vision-capable chat model at
+all.** `KNOWN_VISION_MODELS` is therefore empty and vision detection rests entirely on
+the `VISION_PATTERNS` name heuristics, so a future Groq vision model works through
+`Manual Input` with no code change. Until then the Groq node's `image_input` has
+nothing to talk to, and the tooltip, help text, and README say so; the rejection
+message no longer trails off into an empty "Currently known: " list. Use the
+OpenRouter Chat node for vision work in the meantime.
+
 An end-to-end audit of the three nodes against the current Groq and OpenRouter APIs,
 checking that every widget does what its tooltip claims. Each defect below was
 reproduced before being fixed and is covered by a regression test in `tests/`.

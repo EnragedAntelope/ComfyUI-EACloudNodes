@@ -93,7 +93,7 @@ def groq_call(monkeypatch):
 
         kwargs = dict(
             api_key="test-key",
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             manual_model="",
             system_prompt="be helpful",
             user_prompt="hello there",

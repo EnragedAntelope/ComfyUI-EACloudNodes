@@ -59,7 +59,7 @@ def test_fetch_without_key_returns_static_fallback():
 
 def test_fetch_with_key_uses_the_api(monkeypatch):
     payload = {"data": [
-        {"id": "llama-3.3-70b-versatile", "active": True},
+        {"id": "openai/gpt-oss-120b", "active": True},
         {"id": "brand-new-model", "active": True},
         {"id": "whisper-large-v3", "active": True},
         {"id": "retired-model", "active": False},
@@ -92,13 +92,25 @@ def test_vision_detection_ignores_inactive_and_audio_models():
     detected = groq_node._detect_vision_models([
         {"id": "meta-llama/llama-4-scout-17b-16e-instruct", "active": True},
         {"id": "some-vl-model", "active": True},
-        {"id": "llama-3.3-70b-versatile", "active": True},
+        {"id": "openai/gpt-oss-120b", "active": True},
         {"id": "hidden-vision-model", "active": False},
     ])
     assert "meta-llama/llama-4-scout-17b-16e-instruct" in detected
     assert "some-vl-model" in detected
-    assert "llama-3.3-70b-versatile" not in detected
+    assert "openai/gpt-oss-120b" not in detected
     assert "hidden-vision-model" not in detected
+
+
+def test_vision_support_survives_an_empty_known_list(groq_call):
+    """
+    Groq retired its last vision model, so KNOWN_VISION_MODELS is empty and the
+    name patterns are the only thing keeping the image input usable. A future
+    vision model must work through 'Manual Input' with no code change.
+    """
+    assert groq_node.KNOWN_VISION_MODELS == []
+    out = groq_call(model="Manual Input", manual_model="groq/some-new-vision-model",
+                    send_system="no", image_input=torch.rand(1, 16, 16, 3))
+    assert out.args[0] == "hello"
 
 
 # --------------------------------------------------------------------------
@@ -197,6 +209,7 @@ def test_empty_user_prompt_is_rejected(groq_call):
     ("--- Featured ---", "", "category label"),
     ("Manual Input", "", "Manual model identifier is required"),
     ("Manual Input", "whisper-large-v3", "audio endpoints"),
+    ("Manual Input", "canopylabs/orpheus-v1-english", "audio endpoints"),
 ])
 def test_validate_inputs_rejects_bad_models(model, manual, expected):
     result = GroqNode.validate_inputs(
@@ -206,18 +219,18 @@ def test_validate_inputs_rejects_bad_models(model, manual, expected):
 
 def test_validate_inputs_accepts_a_valid_selection():
     assert GroqNode.validate_inputs(
-        api_key="k", model="llama-3.3-70b-versatile", manual_model="", user_prompt="hi") is True
+        api_key="k", model="openai/gpt-oss-120b", manual_model="", user_prompt="hi") is True
 
 
 def test_validate_inputs_requires_an_api_key():
     result = GroqNode.validate_inputs(
-        api_key="", model="llama-3.3-70b-versatile", manual_model="", user_prompt="hi")
+        api_key="", model="openai/gpt-oss-120b", manual_model="", user_prompt="hi")
     assert "API key is required" in result
 
 
 def test_validate_inputs_rejects_non_object_additional_params():
     result = GroqNode.validate_inputs(
-        api_key="k", model="llama-3.3-70b-versatile", manual_model="",
+        api_key="k", model="openai/gpt-oss-120b", manual_model="",
         user_prompt="hi", additional_params="[1,2]")
     assert "must be a JSON object" in result
 
@@ -306,9 +319,16 @@ def test_oversized_image_is_rejected(groq_call):
 
 
 def test_image_on_a_text_only_model_is_rejected(groq_call):
-    out = groq_call(model="llama-3.3-70b-versatile", image_input=torch.rand(1, 32, 32, 3))
+    out = groq_call(model="openai/gpt-oss-120b", image_input=torch.rand(1, 32, 32, 3))
     assert "does not support vision" in out.args[1]
     assert groq_call.calls["calls"] == []
+
+
+def test_rejection_reads_cleanly_when_no_vision_model_is_offered(groq_call):
+    """The old message ended in a dangling 'Currently known: ' with an empty list."""
+    out = groq_call(model="openai/gpt-oss-120b", image_input=torch.rand(1, 32, 32, 3))
+    assert "lists no vision-capable chat model" in out.args[1]
+    assert not out.args[1].rstrip().endswith(":")
 
 
 def test_out_of_range_pixels_do_not_crash_conversion(groq_call):
@@ -386,7 +406,7 @@ def test_network_error_is_retried_then_reported(monkeypatch, no_sleep):
 
     monkeypatch.setattr(groq_node.requests, "post", boom)
     out = GroqNode.execute(
-        api_key="k", model="llama-3.3-70b-versatile", manual_model="", system_prompt="",
+        api_key="k", model="openai/gpt-oss-120b", manual_model="", system_prompt="",
         user_prompt="hi", send_system="no", temperature=0.7, top_p=0.7,
         max_completion_tokens=10, frequency_penalty=0.0, presence_penalty=0.0,
         response_format="text", seed_mode="fixed", seed_value=0, max_retries=2,

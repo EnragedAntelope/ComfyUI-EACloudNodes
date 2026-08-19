@@ -71,29 +71,27 @@ falling back to the static list whenever the API is unreachable).
 Rows shown as `--- Category ---` are group labels, not selectable models.
 
 **Featured:**
-- `groq/compound` - Multi-model agentic system with tools
-- `openai/gpt-oss-120b` - Large open-source GPT
+- `openai/gpt-oss-120b` - **Default** - 131K context, 500 T/sec
+- `groq/compound` - Agentic system with web search and code execution
 
 **Production: Chat** (stable, recommended for production use):
-- `llama-3.1-8b-instant` - Fast 8B parameter model
-- `llama-3.3-70b-versatile` - **Default** - Powerful 70B model
-- `openai/gpt-oss-20b` - Efficient open-source GPT
+- `openai/gpt-oss-20b` - Faster and cheaper, 131K context, 1000 T/sec
 
 **Production: Systems:**
 - `groq/compound-mini` - Lightweight agentic system
 
-**Preview: Chat** (experimental, for evaluation only):
-- `meta-llama/llama-4-scout-17b-16e-instruct` - **Vision**
-- `openai/gpt-oss-safeguard-20b` - Safety-focused model
-- `qwen/qwen3-32b` - Qwen 32B model
+**Preview: Chat** (experimental, may be discontinued at short notice):
+- `minimaxai/minimax-m2.7` - 196K context, 131K max completion
+- `openai/gpt-oss-safeguard-20b` - Safety-focused reasoning model
+- `qwen/qwen3.6-27b` - 131K context, accepts files up to 20 MB
 
-**Preview: Safety:**
-- `meta-llama/llama-prompt-guard-2-22m` - Prompt injection detection
-- `meta-llama/llama-prompt-guard-2-86m` - Enhanced prompt guard
-
-> Groq's speech models (Whisper, Orpheus) are deliberately **not** offered here.
-> They are served by `/audio/transcriptions` and `/audio/speech`, so they cannot
-> answer a chat-completions request; selecting one is rejected with a clear message.
+> **Not offered in the dropdown:**
+> - Groq's speech models (Whisper, Orpheus) are served by `/audio/transcriptions`
+>   and `/audio/speech`, so they cannot answer a chat-completions request at all.
+>   Selecting one is rejected with a clear message.
+> - The `llama-prompt-guard-2-*` classifiers work over chat completions but have a
+>   512-token window and return a safety score rather than prose, so they are left
+>   out of the curated list. Reach them with `Manual Input` if you want them.
 
 #### Parameters:
 - `api_key`: ⚠️ Your Groq API key (Get from [console.groq.com/keys](https://console.groq.com/keys))
@@ -129,11 +127,18 @@ Rows shown as `--- Category ---` are group labels, not selectable models.
 - `help`: Comprehensive help text with usage information
 
 #### Vision Model Usage:
-1. Select a vision-capable model:
-   - `meta-llama/llama-4-scout-17b-16e-instruct` (known vision model)
-   - Models with `vision`, `vl`, or `-4-` in their ID are auto-detected
+
+> ⚠️ **Groq's catalogue currently lists no vision-capable chat model.** Llama 4
+> Scout, the last one, has been retired. The `image_input` on this node therefore
+> has nothing to talk to right now — use the **OpenRouter Chat** node for vision
+> work until Groq adds one back.
+
+When Groq does offer one again, no code change is needed:
+
+1. Select the vision-capable model (from the dropdown, or via `Manual Input`).
+   Models with `vision`, `vl`, or `-4-` in their ID are auto-detected.
 2. Connect an image to the `image_input` parameter
-3. Set `send_system` to "no" (vision models don't accept system prompts)
+3. Set `send_system` to "no" (vision models often reject system prompts)
 4. Describe what you want to know about the image in `user_prompt`
 
 Images are capped at 2048 pixels per dimension, and only the first image of a
@@ -299,6 +304,17 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 ## Version History
 
 ### v2.1.0 (Current)
+- **Model list refreshed against Groq's current catalogue**
+  - `llama-3.3-70b-versatile` (the node's **default**) and `llama-3.1-8b-instant`
+    have been retired by Groq. The default is now `openai/gpt-oss-120b`; before
+    this change the node failed out of the box.
+  - `meta-llama/llama-4-scout-17b-16e-instruct` and `qwen/qwen3-32b` are gone
+  - Added `minimaxai/minimax-m2.7` and `qwen/qwen3.6-27b`
+  - Groq no longer offers **any** vision-capable chat model, so `KNOWN_VISION_MODELS`
+    is empty and vision detection now rests entirely on the name patterns — a future
+    vision model works with no code change
+  - The `llama-prompt-guard-2-*` classifiers left the curated dropdown (512-token
+    safety classifiers, not chat models); still reachable via `Manual Input`
 - **Correctness**
   - Groq: send `max_completion_tokens` instead of the deprecated `max_tokens`
   - Groq: dropped Whisper/Orpheus from the chat dropdown — they are served by the
