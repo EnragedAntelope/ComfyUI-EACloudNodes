@@ -24,7 +24,9 @@ _groq_model_cache = {
     "models": None,
     "vision_models": None,
     "last_fetch": 0,
-    "cache_ttl": 300  # 5 minutes
+    "cache_ttl": 300,  # 5 minutes
+    "last_failure": 0,
+    "failure_backoff": 60  # don't re-try a failing fetch on every execution
 }
 
 # Model categorization mapping (hybrid approach - applied to fetched models)
@@ -32,7 +34,6 @@ MODEL_CATEGORIES = {
     "Featured": ["groq/compound", "openai/gpt-oss-120b"],
     "Production: Chat": ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
     "Production: Systems": ["groq/compound-mini"],
-    "Production: Audio": ["whisper-large-v3", "whisper-large-v3-turbo"],
     "Preview: Chat": [
         "meta-llama/llama-4-scout-17b-16e-instruct",
         "openai/gpt-oss-safeguard-20b",
@@ -42,11 +43,14 @@ MODEL_CATEGORIES = {
         "meta-llama/llama-prompt-guard-2-22m",
         "meta-llama/llama-prompt-guard-2-86m",
     ],
-    "Preview: Audio": [
-        "canopylabs/orpheus-arabic-saudi",
-        "canopylabs/orpheus-v1-english",
-    ],
 }
+
+# Speech-to-text and text-to-speech models are served by /audio/transcriptions and
+# /audio/speech, not /chat/completions, so they can never work in this node.
+AUDIO_MODEL_PATTERNS = ["whisper", "orpheus", "playai-tts", "tts-"]
+
+# Prefix used for the non-selectable category separators in the model dropdown.
+CATEGORY_SEPARATOR_PREFIX = "---"
 
 # Known vision models (hybrid detection: hardcoded list + pattern matching)
 KNOWN_VISION_MODELS = [
@@ -65,9 +69,6 @@ STATIC_FALLBACK_MODELS = [
     "openai/gpt-oss-20b",
     "--- Production: Systems ---",
     "groq/compound-mini",
-    "--- Production: Audio ---",
-    "whisper-large-v3",
-    "whisper-large-v3-turbo",
     "--- Preview: Chat ---",
     "meta-llama/llama-4-scout-17b-16e-instruct",
     "openai/gpt-oss-safeguard-20b",
@@ -75,9 +76,6 @@ STATIC_FALLBACK_MODELS = [
     "--- Preview: Safety ---",
     "meta-llama/llama-prompt-guard-2-22m",
     "meta-llama/llama-prompt-guard-2-86m",
-    "--- Preview: Audio ---",
-    "canopylabs/orpheus-arabic-saudi",
-    "canopylabs/orpheus-v1-english",
     "Manual Input",
 ]
 
@@ -85,6 +83,17 @@ STATIC_FALLBACK_MODELS = [
 # ============================================================================
 # MODULE-LEVEL FUNCTIONS (Dynamic Model Fetching)
 # ============================================================================
+
+def _is_audio_model(model_id: str) -> bool:
+    """True for speech-to-text / text-to-speech models, which this node cannot call."""
+    lowered = model_id.lower()
+    return any(pattern in lowered for pattern in AUDIO_MODEL_PATTERNS)
+
+
+def _is_category_separator(model_id: str) -> bool:
+    """True for the '--- Category ---' rows used to group the dropdown."""
+    return model_id.strip().startswith(CATEGORY_SEPARATOR_PREFIX)
+
 
 def _get_static_fallback_models() -> tuple[list[str], list[str]]:
     """Return comprehensive static fallback list."""
@@ -110,7 +119,11 @@ def _categorize_groq_models(api_models: list[dict]) -> list[str]:
         model_id = model.get("id", "")
         if not model_id or not model.get("active", True):
             continue
-        
+
+        # Audio models use different endpoints and cannot be called from this node
+        if _is_audio_model(model_id):
+            continue
+
         # Find matching category
         if model_id in model_to_category:
             categorized[model_to_category[model_id]].append(model_id)
@@ -142,9 +155,9 @@ def _detect_vision_models(api_models: list[dict]) -> list[str]:
     
     for model in api_models:
         model_id = model.get("id", "")
-        if not model_id or not model.get("active", True):
+        if not model_id or not model.get("active", True) or _is_audio_model(model_id):
             continue
-        
+
         # Check hardcoded list
         if model_id in KNOWN_VISION_MODELS:
             vision_models.append(model_id)
@@ -169,16 +182,23 @@ def _fetch_groq_models(api_key: str = None) -> tuple[list[str], list[str]]:
                Returns static fallback if API call fails or no key provided.
     """
     now = time.time()
-    
+
     # Return cached results if still fresh
     if (_groq_model_cache["models"] is not None and
             now - _groq_model_cache["last_fetch"] < _groq_model_cache["cache_ttl"]):
         return _groq_model_cache["models"], _groq_model_cache["vision_models"]
-    
+
     # If no API key, return static fallback
     if not api_key or not api_key.strip():
         return _get_static_fallback_models()
-    
+
+    # Back off after a failure too, so a broken key or an offline host does not
+    # add a request (and its timeout) to every single node execution.
+    if now - _groq_model_cache["last_failure"] < _groq_model_cache["failure_backoff"]:
+        if _groq_model_cache["models"] is not None:
+            return _groq_model_cache["models"], _groq_model_cache["vision_models"]
+        return _get_static_fallback_models()
+
     try:
         # Fetch from Groq API
         response = requests.get(
@@ -206,6 +226,7 @@ def _fetch_groq_models(api_key: str = None) -> tuple[list[str], list[str]]:
         return categorized_models, vision_models
         
     except Exception:
+        _groq_model_cache["last_failure"] = now
         # Return previously cached results if available
         if _groq_model_cache["models"] is not None:
             return _groq_model_cache["models"], _groq_model_cache["vision_models"]
@@ -226,8 +247,11 @@ class GroqNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # Class-level storage for seed tracking per node instance
+    # Class-level storage for seed counters, keyed by (model, starting seed)
     _last_seed = {}
+
+    # Upper bound on tracked seed counters, so the dict cannot grow without bound
+    MAX_TRACKED_SEEDS = 1024
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -382,20 +406,45 @@ class GroqNode(io.ComfyNode):
             return "Groq API key is required. Get one at https://console.groq.com/keys"
 
         # Validate model selection
-        actual_model = manual_model if model == "Manual Input" else model
         if model == "Manual Input" and (not manual_model or not manual_model.strip()):
             return "Manual model identifier is required when 'Manual Input' is selected"
 
+        # Category headers are group labels, not selectable models
+        if _is_category_separator(model):
+            return f"'{model}' is a category label, not a model. Please select a model from the dropdown."
+
+        # Audio models are served by different Groq endpoints and cannot be used here
+        actual_model = manual_model if model == "Manual Input" else model
+        if actual_model and _is_audio_model(actual_model):
+            return (
+                f"'{actual_model}' is a speech model served by Groq's audio endpoints "
+                "and cannot be used for chat completions. Please select a chat model."
+            )
 
         # Validate additional_params if provided
         additional_params = kwargs.get("additional_params", "")
         if additional_params and additional_params.strip():
             try:
-                json.loads(additional_params)
+                parsed = json.loads(additional_params)
             except json.JSONDecodeError:
                 return "Invalid JSON in additional parameters. Example format: {\"stop\": [\"\\n\"]}"
+            if not isinstance(parsed, dict):
+                return "Additional parameters must be a JSON object. Example format: {\"stop\": [\"\\n\"]}"
 
         return True
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        """
+        Equivalent of V1's IS_CHANGED.
+
+        The seed is derived inside execute(), so with unchanged widgets ComfyUI would
+        serve a cached response and the non-fixed seed modes would never take effect.
+        Returning NaN marks the node dirty whenever the seed is meant to move.
+        """
+        if kwargs.get("seed_mode", "fixed") != "fixed":
+            return float("nan")
+        return kwargs.get("seed_value", 0)
 
     @classmethod
     def execute(
@@ -428,69 +477,48 @@ Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from https://console.groq.com/keys
-  * Used to fetch latest model list from Groq API (5-minute cache)
-- Model: Dynamically fetched from Groq API with categories:
+  * Also used to refresh the model list from the Groq API
+- Model: Pick from the dropdown or choose 'Manual Input'
   * Featured: groq/compound, openai/gpt-oss-120b
-  * Production: Stable models for production use (llama-3.3-70b-versatile default)
-  * Preview: Experimental models (may be deprecated)
-  * Use ComfyUI's Refresh button to update model list from Groq API
-  * Falls back to static list if API unavailable
-- System Prompt: Set AI behavior/context (disable for vision models)
-Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
-
-Key Settings:
-- API Key: Get from https://console.groq.com/keys
-- Model: Choose from dropdown or use Manual Input
-  * Featured: groq/compound, openai/gpt-oss-120b
-  * Production Chat: llama-3.3-70b-versatile (default), llama-3.1-8b-instant, etc.
-  * Preview Chat: llama-4-scout (vision), kimi-k2, qwen3-32b, etc.
-- System Prompt: Set AI behavior/context (disable for vision models)
-- User Prompt: Main input for the model
-- Send System: Toggle system prompt (off for vision models)
+  * Production: stable models (llama-3.3-70b-versatile is the default)
+  * Preview: experimental models, may be deprecated without notice
+  * Rows shown as '--- Category ---' are labels, not selectable models
+  * Speech models (Whisper, Orpheus) are excluded: they use Groq's audio
+    endpoints, not chat completions
+- Manual Model: custom model id, used only when 'Manual Input' is selected
+- System Prompt: sets AI behavior/context
+- User Prompt: main input for the model (required)
+- Send System: set to 'no' for vision models that reject system prompts
 - Temperature: 0.0 (focused) to 2.0 (creative)
-- Top-p: Nucleus sampling threshold (0.0-1.0)
-- Max Tokens: Response length limit (varies by model)
-- Frequency Penalty: Reduce token frequency (-2.0 to 2.0)
-- Presence Penalty: Encourage topic diversity (-2.0 to 2.0)
-- Response Format: Text or JSON object output
-- Seed Mode: Fixed/random/increment/decrement for reproducibility
-- Seed Value: Seed for 'fixed' mode (0-9007199254740991)
-- Max Retries: Auto-retry on errors (0-5)
-- Debug Mode: Enable for detailed error messages
+- Top-p: nucleus sampling threshold (0.0-1.0)
+- Max Completion Tokens: response length limit (varies by model)
+- Frequency Penalty: reduce token frequency (-2.0 to 2.0), sent only when non-zero
+- Presence Penalty: encourage topic diversity (-2.0 to 2.0), sent only when non-zero
+- Response Format: text or JSON object output
+- Seed Mode: fixed / random / increment / decrement
+- Seed Value: seed used by 'fixed' mode (0-9007199254740991)
+- Max Retries: auto-retry on rate limits and 5xx errors (0-5)
+- Debug Mode: include the request body in 400-error messages
 
 Optional:
-- Image Input: For vision-capable models (auto-detected)
+- Image Input: for vision-capable models
   * Known: meta-llama/llama-4-scout-17b-16e-instruct
-  * Pattern detection: models with 'vision', 'vl', or '-4-' in ID
-  * Max size: 2048x2048 per dimension
-- Additional Params: Extra model parameters in JSON
+  * Also detected from model ids containing 'vision', 'vl', or '-4-'
+  * Max size: 2048x2048 per dimension; only the first image of a batch is sent
+- Additional Params: extra Groq parameters as a JSON object, merged into the
+  request body (it overrides the widgets above on key collisions)
 
 Vision Models:
 1. Connect an image to image_input
-2. Select a vision-capable model (auto-detected from Groq API)
-3. Set 'send_system' to 'no' (vision models don't accept system prompts)
+2. Select a vision-capable model
+3. Set 'send_system' to 'no' (vision models often reject system prompts)
 4. Describe what you want to know about the image in user_prompt
 
 Model List:
-- Fetched from Groq API when API key is provided
-- Cached for 5 minutes to reduce API calls
-- Falls back to comprehensive static list if API unavailable
-- Categories help identify model stability and purpose
-- Use ComfyUI Refresh button to update from Groq API
-- Image Input: For Llama-4 Scout vision model only
-  * meta-llama/llama-4-scout-17b-16e-instruct
-  * Max size: 2048x2048 per dimension
-- Additional Params: Extra model parameters in JSON
-
-Vision Models:
-1. Connect an image to image_input
-2. Select meta-llama/llama-4-scout-17b-16e-instruct
-3. Set 'send_system' to 'no'
-4. Describe what you want to know about the image in user_prompt
-
-Production vs Preview Models:
-- Production: Stable, reliable, recommended for production use
-- Preview: Experimental, may be deprecated, for evaluation only
+- Ships with a static list of known chat models
+- Run the node once with a valid API key, then use ComfyUI's Refresh button to
+  replace the dropdown with the live list from the Groq API (cached 5 minutes)
+- Falls back to the static list whenever the API is unreachable
 
 For full documentation and examples, visit:
 https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
@@ -516,8 +544,24 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model.strip() if model == "Manual Input" else model
 
-            # Handle seed based on mode
-            # Key by (model, seed_value) so each node instance gets its own counter
+            if _is_category_separator(actual_model):
+                return io.NodeOutput(
+                    "",
+                    f"Error: '{actual_model}' is a category label, not a model. Please select a model from the dropdown.",
+                    help_text
+                )
+
+            if _is_audio_model(actual_model):
+                return io.NodeOutput(
+                    "",
+                    f"Error: '{actual_model}' is a speech model served by Groq's audio endpoints "
+                    "and cannot be used for chat completions. Please select a chat model.",
+                    help_text
+                )
+
+            # Handle seed based on mode.
+            # Counters are keyed by (model, starting seed) and capped so long-running
+            # sessions cannot grow this dict without bound.
             node_key = (actual_model, seed_value)
             if seed_mode == "random":
                 seed = random.randint(0, cls.MAX_SAFE_INTEGER)
@@ -531,10 +575,14 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 seed = seed_value
 
             # Store the seed we're using
+            if len(cls._last_seed) >= cls.MAX_TRACKED_SEEDS:
+                cls._last_seed.clear()
             cls._last_seed[node_key] = seed
 
-            # Check if model supports vision capabilities (dynamic detection)
-            _, vision_models = _fetch_groq_models(api_key=None)
+            # Check if model supports vision capabilities.
+            # Passing the key here is what warms the module cache, so a later ComfyUI
+            # Refresh can rebuild the dropdown from the live Groq model list.
+            _, vision_models = _fetch_groq_models(api_key=api_key)
             if vision_models is None:
                 vision_models = KNOWN_VISION_MODELS
             is_vision_model = (
@@ -565,14 +613,26 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 try:
                     # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
+                        # ComfyUI IMAGE tensors are [batch, height, width, channels];
+                        # take the first frame rather than failing on batches > 1.
                         if image_input.dim() == 4:
-                            image_input = image_input.squeeze(0)
+                            image_input = image_input[0]
                         if image_input.dim() != 3:
-                            return io.NodeOutput("", "Error: Image tensor must be 3D after squeezing", help_text)
+                            return io.NodeOutput(
+                                "",
+                                f"Error: Expected a 3D or 4D image tensor, got {image_input.dim()}D",
+                                help_text
+                            )
 
                         if image_input.shape[-1] in [1, 3, 4]:
                             image_input = image_input.permute(2, 0, 1)
 
+                        image_input = image_input.cpu()
+                        # ComfyUI IMAGE tensors are floats in 0..1; clamping keeps an
+                        # out-of-range upstream result from wrapping around on convert.
+                        # Integer tensors are already in 0..255 and must not be clamped.
+                        if image_input.is_floating_point():
+                            image_input = image_input.clamp(0, 1)
                         pil_image = ToPILImage()(image_input)
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
@@ -615,7 +675,8 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
-                "max_tokens": max_completion_tokens
+                # Groq deprecated "max_tokens" in favour of "max_completion_tokens"
+                "max_completion_tokens": max_completion_tokens
             }
 
             # Add seed
@@ -637,9 +698,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             if additional_params and additional_params.strip():
                 try:
                     extra_params = json.loads(additional_params)
-                    body.update(extra_params)
                 except json.JSONDecodeError:
                     return io.NodeOutput("", "Error: Invalid JSON in additional parameters. Example format: {\"stop\": [\"\\n\"]}", help_text)
+                if not isinstance(extra_params, dict):
+                    return io.NodeOutput("", "Error: Additional parameters must be a JSON object. Example format: {\"stop\": [\"\\n\"]}", help_text)
+                body.update(extra_params)
 
             # Make API request with retry logic
             retries = 0
@@ -709,6 +772,9 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     else:
                         return io.NodeOutput("", "Error: No response content from model", help_text)
 
+                except requests.exceptions.JSONDecodeError:
+                    # A 200 with a malformed body is not worth retrying
+                    return io.NodeOutput("", "Error: Invalid JSON response from Groq", help_text)
                 except requests.exceptions.RequestException as req_err:
                     # Retry network-related errors
                     if retries < max_retries:

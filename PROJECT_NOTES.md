@@ -1,5 +1,85 @@
 ## Version History
 
+### v2.1.0 - Repository Audit
+
+An end-to-end audit of the three nodes against the current Groq and OpenRouter APIs,
+checking that every widget does what its tooltip claims. Each defect below was
+reproduced before being fixed and is covered by a regression test in `tests/`.
+
+**API currency**
+
+- Groq chat completions were sent `max_tokens`, which Groq deprecated in favour of
+  `max_completion_tokens`. The widget was already named `max_completion_tokens`; only
+  the wire field was stale.
+- `whisper-large-v3`, `whisper-large-v3-turbo` and the `canopylabs/orpheus-*` models
+  were offered in the chat model dropdown. They are served by `/audio/transcriptions`
+  and `/audio/speech` and cannot answer a chat-completions request at all. They are
+  gone from the list, filtered out of the dynamic fetch, and rejected with an
+  explanatory message if one is entered manually.
+
+**Widgets that did not do what they claimed**
+
+- *Groq dynamic model fetching was dead code.* `_fetch_groq_models()` was only ever
+  called as `_fetch_groq_models(api_key=None)` — once in `define_schema()` and once in
+  `execute()` — so the branch that calls the Groq API was unreachable and the dropdown
+  always showed the static list, despite the tooltip and README promising a live one.
+  `execute()` now passes the user's key, which warms the module cache so a subsequent
+  ComfyUI Refresh rebuilds the dropdown from the API.
+- *The `random`/`increment`/`decrement` seed modes were inert.* The seed is derived
+  inside `execute()`, so with unchanged widgets ComfyUI's output cache served the
+  previous response and the node never re-ran. Both chat nodes now implement
+  `fingerprint_inputs()` (v3's `IS_CHANGED`), returning NaN whenever the seed is meant
+  to move.
+- *`--- Category ---` separator rows were selectable* and were sent to the API as a
+  model id, producing an opaque HTTP 400. They are now rejected up front.
+- *OpenRouter vision gating blocked valid requests.* Capability was checked against the
+  free-model list only, so a paid vision model reached through `Manual Input` (e.g.
+  `openai/gpt-4o`) was hard-refused — under a message labelled "Warning" that actually
+  aborted the run. Capability is now read from `architecture.input_modalities` across
+  the whole catalogue, only positively-known text-only models are refused, and unknown
+  ids are passed through for OpenRouter to answer.
+
+**Crashes and confusing errors**
+
+- An IMAGE batch larger than one failed with "Image tensor must be 3D after squeezing",
+  because `squeeze(0)` cannot drop a non-unit dimension. Both nodes now take the first
+  frame of the batch.
+- OpenRouter Models crashed on a null `context_length` (`'<' not supported between
+  instances of 'int' and 'NoneType'`) and on null pricing (`float() argument must be a
+  string or a real number`). Both fields now go through safe coercion helpers.
+- A JSON array in `additional_params` passed validation and then failed inside
+  `dict.update()` as "Unexpected Error: cannot convert dictionary update sequence
+  element #0 to a sequence". Both nodes now require a JSON object and say so.
+- A malformed HTTP 200 body was caught by `except requests.exceptions.RequestException`
+  and retried as a network error; the `except json.JSONDecodeError` clause below it was
+  unreachable, since `requests.exceptions.JSONDecodeError` subclasses both. Reordered.
+- A failing model-list fetch was not cached, so every execution (and every
+  `/object_info` refresh) paid the full request timeout again. Failures now back off
+  for 60 seconds.
+
+**Housekeeping**
+
+- The OpenRouter Models node demanded an API key for an endpoint that is public — and
+  that the OpenRouter chat node already calls without one. The key is now optional and
+  only sent when supplied.
+- `__init__.py` wrapped its imports in `except ImportError` and then re-imported the
+  same modules, which import `comfy_api` at module scope. The fallback could never
+  succeed; it only obscured the real error. Removed, along with `WEB_DIRECTORY`
+  pointing at a `./web` directory that does not exist.
+- The Groq `help_text` contained a duplicated, self-contradicting second half (it
+  advertised `kimi-k2`, which is not in any list, and described vision support as
+  Scout-only). The README had the same problem in its Features, Production Models, and
+  Vision Usage sections, and carried a hand-maintained list of ~50 OpenRouter "free"
+  models that the code has not used since the dropdown became API-driven.
+- Seed counter dicts are now bounded at 1024 entries.
+
+**Testing**
+
+The two ad-hoc scripts (`test_groq_cache.py`, `test_groq_vision.py`, 12 assertions
+between them, both requiring manual invocation) are replaced by a pytest suite in
+`tests/` with 139 tests. `tests/comfy_stub.py` stands in for `comfy_api.latest`, and an
+autouse fixture blocks all network access, so the suite runs offline without API keys.
+
 ### v2.0.13 (April 22, 2026) - Critical Bug Fix
 
 **Fixed:**

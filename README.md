@@ -2,7 +2,8 @@
 
 A collection of [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
 
-**Note:** All nodes have been updated to ComfyUI v3 spec for enhanced reliability, validation, and features while maintaining backward compatibility with v1.
+**Note:** All nodes use the ComfyUI v3 node spec (`comfy_api.latest`) and are also
+registered through the legacy `NODE_CLASS_MAPPINGS` path.
 
 ## Installation
 
@@ -51,19 +52,9 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 
 #### Features:
 - **ComfyUI v3 compatible** - Enhanced reliability and validation
-- **Dynamic model fetching** - Model list automatically fetched from Groq API (5-min cache)
+- **Live model list** - the dropdown can be rebuilt from the Groq API (5-min cache)
 - High-speed inference with Groq's optimized hardware
-- Comprehensive model selection including production and preview models
-- Support for vision-capable models (Llama-4 Maverick and Scout)
-- Real-time token usage tracking
-- Automatic retry mechanism with exponential backoff
-- Enhanced input validation
-- Detailed tooltips for all parameters
-- Debug mode for troubleshooting
-- **ComfyUI v3 compatible** - Enhanced reliability and validation
-- High-speed inference with Groq's optimized hardware
-- Comprehensive model selection including production and preview models
-- Support for vision-capable models (Llama-4 Maverick and Scout)
+- Support for vision-capable models
 - Real-time token usage tracking
 - Automatic retry mechanism with exponential backoff
 - Enhanced input validation
@@ -72,31 +63,37 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 
 #### Available Models:
 
-**Note:** Model list is dynamically fetched from Groq API when you provide your API key. Categories below are maintained for reference. Use ComfyUI's Refresh button to update the model list.
+The node ships with a static list of known chat models. To pick up newly released
+models, run the node once with a valid API key and then press ComfyUI's **Refresh**
+button — the dropdown is rebuilt from `GET /openai/v1/models` (cached for 5 minutes,
+falling back to the static list whenever the API is unreachable).
 
-**Production Models** (Stable, recommended for production use):
+Rows shown as `--- Category ---` are group labels, not selectable models.
 
-**Production Models** (Stable, recommended for production use):
-- `llama-3.1-8b-instant` - Fast 8B parameter model (560 T/sec)
-- `llama-3.3-70b-versatile` - **Default** - Powerful 70B model (280 T/sec)
-- `meta-llama/llama-guard-4-12b` - Safety and moderation model (1200 T/sec)
-- `openai/gpt-oss-120b` - Large open-source GPT (500 T/sec)
-- `openai/gpt-oss-20b` - Efficient open-source GPT (1000 T/sec)
-- `whisper-large-v3` - Speech recognition model
-- `whisper-large-v3-turbo` - Faster speech recognition
+**Featured:**
+- `groq/compound` - Multi-model agentic system with tools
+- `openai/gpt-oss-120b` - Large open-source GPT
 
-**Production Systems** (Agentic systems with tools):
-- `groq/compound` - Multi-model system with tools
+**Production: Chat** (stable, recommended for production use):
+- `llama-3.1-8b-instant` - Fast 8B parameter model
+- `llama-3.3-70b-versatile` - **Default** - Powerful 70B model
+- `openai/gpt-oss-20b` - Efficient open-source GPT
+
+**Production: Systems:**
 - `groq/compound-mini` - Lightweight agentic system
 
-**Preview Models** (Experimental, for evaluation only):
-- `meta-llama/llama-4-scout-17b-16e-instruct` - **Vision** (750 T/sec)
+**Preview: Chat** (experimental, for evaluation only):
+- `meta-llama/llama-4-scout-17b-16e-instruct` - **Vision**
+- `openai/gpt-oss-safeguard-20b` - Safety-focused model
+- `qwen/qwen3-32b` - Qwen 32B model
+
+**Preview: Safety:**
 - `meta-llama/llama-prompt-guard-2-22m` - Prompt injection detection
 - `meta-llama/llama-prompt-guard-2-86m` - Enhanced prompt guard
-- `openai/gpt-oss-safeguard-20b` - Safety-focused model (1000 T/sec)
-- `canopylabs/orpheus-arabic-saudi` - Arabic text-to-speech
-- `canopylabs/orpheus-v1-english` - English text-to-speech
-- `qwen/qwen3-32b` - Qwen 32B model (400 T/sec)
+
+> Groq's speech models (Whisper, Orpheus) are deliberately **not** offered here.
+> They are served by `/audio/transcriptions` and `/audio/speech`, so they cannot
+> answer a chat-completions request; selecting one is rejected with a clear message.
 
 #### Parameters:
 - `api_key`: ⚠️ Your Groq API key (Get from [console.groq.com/keys](https://console.groq.com/keys))
@@ -123,7 +120,7 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - `seed_value`: Seed for 'fixed' mode (0-9007199254740991)
 - `max_retries`: Auto-retry attempts for recoverable errors (0-5)
 - `debug_mode`: Enable detailed error messages and request debugging
-- `image_input`: Optional image for vision models (Llama-4 only)
+- `image_input`: Optional image for vision-capable models (max 2048x2048)
 - `additional_params`: Extra model parameters in JSON format
 
 #### Outputs:
@@ -132,18 +129,15 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - `help`: Comprehensive help text with usage information
 
 #### Vision Model Usage:
-1. Select a vision-capable model (auto-detected from Groq API):
-   - `meta-llama/llama-4-scout-17b-16e-instruct` (known vision model)
-   - Other models with 'vision', 'vl', or '-4-' in their ID are auto-detected
-2. Connect an image to the `image_input` parameter
-3. Set `send_system` to "no" (vision models don't accept system prompts)
-4. Describe what you want to know about the image in `user_prompt`
 1. Select a vision-capable model:
-   - `meta-llama/llama-4-maverick-17b-128e-instruct`
-   - `meta-llama/llama-4-scout-17b-16e-instruct`
+   - `meta-llama/llama-4-scout-17b-16e-instruct` (known vision model)
+   - Models with `vision`, `vl`, or `-4-` in their ID are auto-detected
 2. Connect an image to the `image_input` parameter
 3. Set `send_system` to "no" (vision models don't accept system prompts)
 4. Describe what you want to know about the image in `user_prompt`
+
+Images are capped at 2048 pixels per dimension, and only the first image of a
+batch is sent.
 
 #### Production vs Preview Models:
 - **Production Models**: Stable, reliable, meet high standards for speed/quality. Recommended for production use.
@@ -156,80 +150,27 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 #### Features:
 - **ComfyUI v3 compatible** - Enhanced reliability and validation
 - Access to multiple AI providers through a single API
-- Comprehensive free model selection
-- Vision model support (Llama 3.2, Llama 4 variants)
+- Free-model dropdown built live from OpenRouter's public catalogue
+- Vision support, with capability read from the catalogue rather than hardcoded
 - JSON output support
 - Automatic retry mechanism with exponential backoff
 - Enhanced input validation
 - Detailed tooltips for all parameters
 - Debug mode for troubleshooting
 
-#### Available Free Models:
-**Meta Llama Models:**
-- meta-llama/llama-3.3-70b-instruct:free - **Default**
-- meta-llama/llama-3.3-8b-instruct:free
-- meta-llama/llama-3.2-3b-instruct:free
-- meta-llama/llama-3.2-1b-instruct:free
-- meta-llama/llama-3.1-8b-instruct:free
-- meta-llama/llama-4-maverick:free (**Vision**)
-- meta-llama/llama-4-scout:free (**Vision**)
-- meta-llama/llama-3.2-90b-vision-instruct:free (**Vision**)
+#### Model List:
 
-**Google Models:**
-- google/gemini-2.0-flash-exp:free
-- google/gemma-3-27b-it:free
-- google/gemma-2-27b-it:free
-- google/gemma-2-9b-it:free
-- google/gemma-2-2b-it:free
-- google/gemini-flash-1.5-8b-exp:free
+The dropdown is built at load time from OpenRouter's public catalogue
+(`GET /api/v1/models`) and lists every model priced at **$0 for both prompt and
+completion**, plus a `Manual Input` entry. It is not a hand-maintained list, so it
+tracks OpenRouter's free tier as it changes; press ComfyUI's **Refresh** to rebuild
+it (cached for 5 minutes).
 
-**Mistral Models:**
-- mistralai/mistral-small-3.1:free
-- mistralai/ministral-8b:free
-- mistralai/ministral-3b:free
-- mistralai/mistral-saba-24b:free
-- mistralai/mistral-nemo:free
-- mistralai/mistral-7b-instruct:free
+To use a **paid** model, select `Manual Input` and enter its `provider/model-name`
+id in `manual_model`.
 
-**Qwen Models:**
-- qwen/qwen3-72b:free
-- qwen/qwen-2.5-72b-instruct:free
-- qwen/qwen-2.5-coder-32b-instruct:free
-- qwen/qwen-2.5-7b-instruct:free
-- qwen/qwen-2-7b-instruct:free
-- qwen/qwen2.5-vl-32b-instruct:free (**Vision**)
-- qwen/qwen2-vl-7b-instruct:free (**Vision**)
-- qwen/qvq-72b-preview:free (**Vision**)
-
-**Microsoft Models:**
-- microsoft/phi-4:free
-- microsoft/phi-3.5-mini-128k-instruct:free
-- microsoft/phi-3-medium-128k-instruct:free
-
-**DeepSeek Models:**
-- deepseek/deepseek-r1-zero:free
-- deepseek/deepseek-r1-distill-llama-70b:free
-- deepseek/deepseek-r1-distill-llama-8b:free
-- deepseek/deepseek-r1-distill-qwen-32b:free
-- deepseek/deepseek-r1-distill-qwen-14b:free
-- deepseek/deepseek-r1-distill-qwen-7b:free
-- deepseek/deepseek-r1-distill-qwen-1.5b:free
-- deepseek/deepseek-chat:free
-- deepseek/deepseek-reasoner:free
-- deepseek/deepseek-coder:free
-- sophosympatheia/deephermes-3-405b:free
-
-**Nvidia Models:**
-- nvidia/llama-3.1-nemotron-70b-instruct:free
-- nvidia/nemotron-nano-12b-v2-vl:free (**Vision**)
-
-**Other Models:**
-- openchat/openchat-8b:free
-- openchat/openchat-7b:free
-- anthropic/claude-sonnet-4.5:free
-- sophosympatheia/rogue-rose-103b-v0.6.0:free
-- sophosympatheia/midnight-rose-70b-v1.0.5:free
-- huggingfaceh4/zephyr-7b-beta:free
+Use the **OpenRouter Models** node below to browse what is currently on offer,
+including pricing and context lengths.
 
 #### Parameters:
 - `api_key`: ⚠️ Your OpenRouter API key (Get from [https://openrouter.ai/keys](https://openrouter.ai/keys))
@@ -262,13 +203,16 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - `help`: Comprehensive help text with usage information
 
 #### Vision Model Usage:
-1. Select a vision-capable model (marked with **Vision** above)
+1. Select a vision-capable model — from the free dropdown, or via `Manual Input`
+   for a paid one such as `openai/gpt-4o`
 2. Connect an image to the `image_input` parameter
 3. Describe what you want to know about the image in `user_prompt`
-4. Vision-capable models include:
-   - Meta Llama: llama-4-maverick, llama-4-scout, llama-3.2-90b-vision
-   - Qwen: qwen2.5-vl-32b, qwen2-vl-7b, qvq-72b-preview
-   - Nvidia: nemotron-nano-12b-v2-vl
+
+Image capability is read from OpenRouter's own catalogue (`architecture.input_modalities`),
+so it stays correct as models come and go. A model the catalogue lists as text-only is
+rejected before the request is sent; an id the catalogue does not know is passed through
+so OpenRouter can answer for itself. Images are capped at 2048 pixels per dimension, and
+only the first image of a batch is sent.
 
 ### OpenRouter Models Node
 Query and filter available models from OpenRouter's API.
@@ -281,8 +225,11 @@ Query and filter available models from OpenRouter's API.
 - Easy-to-read formatted output
 
 #### Parameters:
-- `api_key`: ⚠️ Your OpenRouter API key (Note: key will be visible in workflows)
-- `filter_text`: Text to filter models
+- `api_key`: Optional — OpenRouter's model catalogue is public, so this can be left
+  empty (Note: if you do supply a key it will be visible in saved workflows)
+- `filter_text`: Text to filter models. `free` is matched against actual pricing
+  rather than the model name; all other terms are matched against id, name, and
+  description, and multiple terms are AND-ed together
 - `sort_by`: Sort models by name, pricing, or context length
 - `sort_order`: Choose ascending or descending sort order
 
@@ -351,7 +298,37 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 
 ## Version History
 
-### v2.0.0 (Current)
+### v2.1.0 (Current)
+- **Correctness**
+  - Groq: send `max_completion_tokens` instead of the deprecated `max_tokens`
+  - Groq: dropped Whisper/Orpheus from the chat dropdown — they are served by the
+    audio endpoints and could never answer a chat-completions request
+  - Groq: selecting a `--- Category ---` row is now rejected with a clear message
+    instead of being sent to the API as a model id
+  - Groq: the model list is now actually fetched from the API — the fetch helper
+    was previously only ever called without a key, so the dropdown never updated
+  - OpenRouter: image capability is read from the full catalogue, so paid vision
+    models entered via `Manual Input` are no longer blocked
+  - Both chat nodes: added `fingerprint_inputs()`, without which the `random`,
+    `increment`, and `decrement` seed modes were inert on re-queue
+  - Both chat nodes: an image batch larger than 1 no longer errors out
+  - OpenRouter Models: null `context_length` and non-numeric pricing no longer
+    crash sorting and filtering
+  - OpenRouter Models: the API key is optional, matching the public endpoint
+- **Robustness**
+  - Failed model-list fetches back off for 60s instead of retrying on every run
+  - `additional_params` must be a JSON object, reported clearly rather than as an
+    "Unexpected Error" from inside `dict.update()`
+  - A malformed 200 response is reported as such instead of being retried as a
+    network error
+  - Seed counters are bounded
+- **Housekeeping**
+  - Removed the `ImportError` fallback that re-imported the same failing modules,
+    and the `WEB_DIRECTORY` pointing at a directory that does not exist
+  - De-duplicated the Groq help text and the README
+  - Added a pytest suite covering all three nodes
+
+### v2.0.0
 - **MAJOR UPDATE**: All nodes converted to ComfyUI v3 spec
 - **Groq Node v3**:
   - Updated models list to latest production and preview models
@@ -404,16 +381,28 @@ All nodes have been fully migrated to ComfyUI v3 spec:
 - Uses `comfy_api.latest` for enhanced reliability
 - Implements `define_schema()` with comprehensive input/output definitions
 - Stateless design with class methods (`execute()`, `validate_inputs()`)
-- Proper `comfy_entrypoint()` function for v3 registration
-- Combined extension class that registers all nodes
-- Maintains full v1 compatibility through legacy NODE_CLASS_MAPPINGS
-- Graceful fallback when v3 API is unavailable
+- Provides both `NODE_CLASS_MAPPINGS` and a `comfy_entrypoint()` extension, so the
+  pack registers on whichever path a given ComfyUI build checks
+- `fingerprint_inputs()` (v3's `IS_CHANGED`) so the non-fixed seed modes actually
+  re-run instead of serving a cached response
+
+These nodes require `comfy_api.latest`, which ships with current ComfyUI builds.
 
 ### API Compatibility
 - **Groq**: OpenAI-compatible API endpoint
 - **OpenRouter**: Multi-provider aggregation API
 - Both support standard OpenAI message format
 - Vision models use base64-encoded images in message content
+
+## Development
+
+Run the test suite (no API keys and no network access required — every HTTP call is
+stubbed):
+
+```bash
+pip install pytest
+python -m pytest tests
+```
 
 ## Contributing
 

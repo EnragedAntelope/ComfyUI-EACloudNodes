@@ -1,7 +1,7 @@
 [project]
 name = "eacloudnodes"
-description = "ComfyUI v3 compatible nodes for cloud AI services. All nodes (Groq, OpenRouter, OpenRouter Models) fully migrated to v3 with enhanced validation, tooltips, and error handling. Vision support, JSON output, auto-retry. Works in all ComfyUI environments."
-version = "2.0.14"
+description = "ComfyUI v3 nodes for cloud LLM services: Groq Chat, OpenRouter Chat, and an OpenRouter model browser. Live model lists, vision support, JSON output, seed control, and automatic retries."
+version = "2.1.0"
 license = {file = "LICENSE"}
 dependencies = ["pillow", "requests", "torch", "torchvision"]
 

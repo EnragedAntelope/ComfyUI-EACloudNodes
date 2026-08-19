@@ -20,9 +20,36 @@ from comfy_api.latest import ComfyExtension, io
 _openrouter_model_cache = {
     "models": None,
     "vision_models": None,
+    "known_models": None,
     "last_fetch": 0,
-    "cache_ttl": 300  # 5 minutes
+    "cache_ttl": 300,  # 5 minutes
+    "last_failure": 0,
+    "failure_backoff": 60  # don't re-try a failing fetch on every execution
 }
+
+
+def _model_accepts_images(model: dict) -> bool:
+    """
+    Decide whether an OpenRouter model entry accepts image input.
+
+    Prefers the architecture metadata (``input_modalities`` on current API
+    responses, ``modality`` on older ones) and falls back to the naming
+    convention used by most vision models.
+    """
+    arch = model.get("architecture") or {}
+
+    input_modalities = arch.get("input_modalities") or []
+    if isinstance(input_modalities, list):
+        if any(str(m).lower() == "image" for m in input_modalities):
+            return True
+
+    modality = str(arch.get("modality") or "").lower()
+    # e.g. "text+image->text"; only the input side (before "->") counts
+    if "image" in modality.split("->")[0]:
+        return True
+
+    haystack = f"{model.get('id', '')} {model.get('name', '')}".lower()
+    return "vision" in haystack or "-vl" in haystack or "vl-" in haystack
 
 
 def _fetch_openrouter_free_models():
@@ -38,6 +65,11 @@ def _fetch_openrouter_free_models():
             now - _openrouter_model_cache["last_fetch"] < _openrouter_model_cache["cache_ttl"]):
         return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
 
+    # Back off after a failure too, so an offline host does not add a request
+    # (and its timeout) to every node execution and every /object_info refresh.
+    if now - _openrouter_model_cache["last_failure"] < _openrouter_model_cache["failure_backoff"]:
+        return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
+
     try:
         response = requests.get(
             "https://openrouter.ai/api/v1/models",
@@ -50,9 +82,21 @@ def _fetch_openrouter_free_models():
 
         free_models = []
         vision_models = []
+        known_models = []
 
         for model in data:
-            pricing = model.get("pricing", {})
+            model_id = model.get("id", "")
+            if not model_id:
+                continue
+
+            known_models.append(model_id)
+
+            # Vision capability is tracked for every model, not just the free ones,
+            # so models entered via 'Manual Input' can be checked too.
+            if _model_accepts_images(model):
+                vision_models.append(model_id)
+
+            pricing = model.get("pricing") or {}
             try:
                 is_free = (
                     float(pricing.get("prompt", "1")) == 0 and
@@ -61,34 +105,21 @@ def _fetch_openrouter_free_models():
             except (ValueError, TypeError):
                 continue
 
-            if not is_free:
-                continue
-
-            model_id = model.get("id", "")
-            if not model_id:
-                continue
-
-            free_models.append(model_id)
-
-            # Detect vision-capable models from architecture metadata
-            arch = model.get("architecture", {})
-            modality = arch.get("modality", "").lower()
-            model_name = model.get("name", "").lower()
-            if ("image" in modality or "multimodal" in modality or
-                    "vision" in model_name or "vl" in model_name or
-                    "vision" in model_id.lower() or "vl" in model_id.lower()):
-                vision_models.append(model_id)
+            if is_free:
+                free_models.append(model_id)
 
         free_models.sort()
         free_models.append("Manual Input")
 
         _openrouter_model_cache["models"] = free_models
         _openrouter_model_cache["vision_models"] = vision_models
+        _openrouter_model_cache["known_models"] = known_models
         _openrouter_model_cache["last_fetch"] = now
 
         return free_models, vision_models
 
     except Exception:
+        _openrouter_model_cache["last_failure"] = now
         # Return previously cached results if available, otherwise None
         if _openrouter_model_cache["models"] is not None:
             return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
@@ -104,8 +135,11 @@ class OpenrouterNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # Class-level storage for seed tracking per node instance
+    # Class-level storage for seed counters, keyed by (model, starting seed)
     _last_seed = {}
+
+    # Upper bound on tracked seed counters, so the dict cannot grow without bound
+    MAX_TRACKED_SEEDS = 1024
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -261,7 +295,7 @@ class OpenrouterNode(io.ComfyNode):
                 io.Image.Input(
                     "image_input",
                     optional=True,
-                    tooltip="Optional image input for vision-capable models. Supported: llama-4-maverick/scout, nemotron-nano-12b-v2-vl, qwen2.5-vl-32b. Maximum size: 2048x2048."
+                    tooltip="Optional image input. Capability is checked against OpenRouter's model catalogue; models it lists as text-only are rejected. Maximum size: 2048x2048 (only the first image of a batch is sent)."
                 ),
                 io.String.Input(
                     "additional_params",
@@ -293,7 +327,6 @@ class OpenrouterNode(io.ComfyNode):
             return "OpenRouter API key is required. Get one at https://openrouter.ai/keys"
 
         # Validate model selection
-        actual_model = manual_model if model == "Manual Input" else model
         if model == "Manual Input" and (not manual_model or not manual_model.strip()):
             return "Manual model identifier is required when 'Manual Input' is selected"
 
@@ -309,11 +342,26 @@ class OpenrouterNode(io.ComfyNode):
         additional_params = kwargs.get("additional_params", "")
         if additional_params and additional_params.strip():
             try:
-                json.loads(additional_params)
+                parsed = json.loads(additional_params)
             except json.JSONDecodeError:
                 return "Invalid JSON in additional parameters. Example format: {\"top_a\": 0.5}"
+            if not isinstance(parsed, dict):
+                return "Additional parameters must be a JSON object. Example format: {\"top_a\": 0.5}"
 
         return True
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        """
+        Equivalent of V1's IS_CHANGED.
+
+        The seed is derived inside execute(), so with unchanged widgets ComfyUI would
+        serve a cached response and the non-fixed seed modes would never take effect.
+        Returning NaN marks the node dirty whenever the seed is meant to move.
+        """
+        if kwargs.get("seed_mode", "fixed") != "fixed":
+            return float("nan")
+        return kwargs.get("seed_value", 0)
 
     @classmethod
     def execute(
@@ -358,7 +406,7 @@ Key Settings:
 - Send System: Toggle system prompt on/off
 - Temperature: 0.0 (focused) to 2.0 (creative)
 - Top-p: Nucleus sampling threshold (0.0-1.0)
-- Top-k: Vocabulary limit (1-1000)
+- Top-k: Vocabulary limit (1-1000); only sent when changed from the default of 50
 - Max Tokens: Response length limit (1-32,768)
 - Frequency Penalty: Reduce token frequency (-2.0 to 2.0)
 - Presence Penalty: Encourage topic diversity (-2.0 to 2.0)
@@ -370,14 +418,21 @@ Key Settings:
 - Debug Mode: Enable for detailed error messages
 
 Optional:
-- Image Input: For vision-capable models (with 'vision' or 'vl' in name)
-  * Max size: 2048x2048 per dimension
-- Additional Params: Extra model parameters in JSON
+- Image Input: For vision-capable models
+  * Capability is read from OpenRouter's model catalogue; a model the catalogue
+    lists as text-only is rejected, and ids it does not know are passed through
+  * Max size: 2048x2048 per dimension; only the first image of a batch is sent
+- Additional Params: Extra model parameters as a JSON object, merged into the
+  request body (it overrides the widgets above on key collisions)
 
 Vision Models:
-1. Select a vision-capable model (has 'vision' or 'vl' in name)
+1. Select a vision-capable model (dropdown, or 'Manual Input' for paid models)
 2. Connect an image to image_input
 3. Describe what you want to know about the image in user_prompt
+
+Note on the model dropdown:
+- It lists OpenRouter's *free* models only, refreshed from the public catalogue
+- Paid models are reached with 'Manual Input' plus the provider/model id
 
 For full documentation and examples, visit:
 https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
@@ -405,8 +460,9 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model.strip() if model == "Manual Input" else model
 
-            # Handle seed based on mode
-            # Key by (model, seed_value) so each node instance gets its own counter
+            # Handle seed based on mode.
+            # Counters are keyed by (model, starting seed) and capped so long-running
+            # sessions cannot grow this dict without bound.
             node_key = (actual_model, seed_value)
             if seed_mode == "random":
                 seed = random.randint(0, cls.MAX_SAFE_INTEGER)
@@ -420,21 +476,26 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 seed = seed_value
 
             # Store the seed we're using
+            if len(cls._last_seed) >= cls.MAX_TRACKED_SEEDS:
+                cls._last_seed.clear()
             cls._last_seed[node_key] = seed
 
-            # Check if model supports vision capabilities
-            _, vision_models = _fetch_openrouter_free_models()
-            if vision_models is None:
-                vision_models = []
-            is_vision_model = "vision" in actual_model.lower() or "vl" in actual_model.lower() or actual_model in vision_models
-
-            # Vision model validation
-            if image_input is not None and not is_vision_model:
-                return io.NodeOutput(
-                    "",
-                    f"Warning: Model '{actual_model}' may not support vision inputs. Consider using a model with 'vision' or 'vl' in its name. Vision-capable models: {', '.join(vision_models)}",
-                    help_text
-                )
+            # Vision gating. Only refuse when OpenRouter's own catalogue tells us the
+            # selected model does not accept images; unknown ids (custom endpoints,
+            # brand-new models, or an unreachable catalogue) are passed through so the
+            # API can answer for itself instead of us blocking a valid request.
+            if image_input is not None:
+                _fetch_openrouter_free_models()
+                vision_models = _openrouter_model_cache.get("vision_models") or []
+                known_models = _openrouter_model_cache.get("known_models") or []
+                if actual_model in known_models and actual_model not in vision_models:
+                    return io.NodeOutput(
+                        "",
+                        f"Error: Model '{actual_model}' does not accept image input according to "
+                        "OpenRouter's model catalogue. Choose a vision-capable model, or disconnect "
+                        "the image input.",
+                        help_text
+                    )
 
             # Prepare headers
             headers = {
@@ -457,14 +518,26 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 try:
                     # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
+                        # ComfyUI IMAGE tensors are [batch, height, width, channels];
+                        # take the first frame rather than failing on batches > 1.
                         if image_input.dim() == 4:
-                            image_input = image_input.squeeze(0)
+                            image_input = image_input[0]
                         if image_input.dim() != 3:
-                            return io.NodeOutput("", "Error: Image tensor must be 3D after squeezing", help_text)
+                            return io.NodeOutput(
+                                "",
+                                f"Error: Expected a 3D or 4D image tensor, got {image_input.dim()}D",
+                                help_text
+                            )
 
                         if image_input.shape[-1] in [1, 3, 4]:
                             image_input = image_input.permute(2, 0, 1)
 
+                        image_input = image_input.cpu()
+                        # ComfyUI IMAGE tensors are floats in 0..1; clamping keeps an
+                        # out-of-range upstream result from wrapping around on convert.
+                        # Integer tensors are already in 0..255 and must not be clamped.
+                        if image_input.is_floating_point():
+                            image_input = image_input.clamp(0, 1)
                         pil_image = ToPILImage()(image_input)
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
@@ -534,9 +607,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             if additional_params and additional_params.strip():
                 try:
                     extra_params = json.loads(additional_params)
-                    body.update(extra_params)
                 except json.JSONDecodeError:
                     return io.NodeOutput("", "Error: Invalid JSON in additional parameters. Example format: {\"top_a\": 0.5}", help_text)
+                if not isinstance(extra_params, dict):
+                    return io.NodeOutput("", "Error: Additional parameters must be a JSON object. Example format: {\"top_a\": 0.5}", help_text)
+                body.update(extra_params)
 
             # Make API request with retry logic
             retries = 0
@@ -608,6 +683,9 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                         time.sleep(2 ** retries)
                         continue
                     return io.NodeOutput("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
+                except requests.exceptions.JSONDecodeError:
+                    # A 200 with a malformed body is not worth retrying
+                    return io.NodeOutput("", "Error: Invalid JSON response from OpenRouter", help_text)
                 except requests.exceptions.RequestException as req_err:
                     # Retry network-related errors
                     if retries < max_retries:
@@ -615,8 +693,6 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                         time.sleep(2 ** retries)
                         continue
                     return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
-                except json.JSONDecodeError:
-                    return io.NodeOutput("", "Error: Invalid JSON response from OpenRouter", help_text)
 
         except Exception as e:
             return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)
