@@ -1,2 +1,5 @@
-Pillow>=10.0.0
-requests>=2.31.0
+# This pack intentionally declares no Python dependencies of its own.
+#
+# Everything the nodes use - including Pillow and requests - ships with ComfyUI
+# itself (see ComfyUI's requirements.txt). Do not re-add them here;
+# tests/test_package.py enforces this.

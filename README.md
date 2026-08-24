@@ -14,12 +14,11 @@ Use [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager), or install m
 cd ComfyUI/custom_nodes
 git clone https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
   ```
-2. Install required packages:
-  ```bash
-cd ComfyUI-EACloudNodes
-pip install -r requirements.txt
-  ```
-3. Restart ComfyUI
+2. Restart ComfyUI
+
+That's the whole install — the pack declares no Python dependencies of its own.
+Everything the nodes use (including `Pillow` and `requests`) ships with ComfyUI
+itself.
 
 ## Current Nodes
 
@@ -307,7 +306,20 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 
 ## Version History
 
-### v2.2.0 (Current)
+### v2.2.1 (Current)
+
+- **Zero-dependency packaging**: removed `pillow` and `requests` from
+  `requirements.txt` and `pyproject.toml`. ComfyUI itself requires both, so every
+  ComfyUI environment already provides them — declaring them only added a
+  redundant pip install step. Existing installs need no action; the pack has
+  nothing of its own to install
+- **CI**: traced the Node.js 20 deprecation warning in the publish workflow to
+  the pinned `Comfy-Org/publish-node-action`, which still calls
+  `actions/setup-python@v5` internally at its pinned commit. Upstream has
+  published nothing newer, and this repo's own steps are current
+  (`actions/checkout@v7.0.1`). Cosmetic until upstream moves
+
+### v2.2.0
 - **Fixed: the pack failed to register in ComfyUI**
   - The new shared module was imported absolutely (`import chat_common`). ComfyUI
     executes a custom node's `__init__.py` under a synthetic module name and never
@@ -496,7 +508,7 @@ Run the test suite (no API keys and no network access required — every HTTP ca
 stubbed):
 
 ```bash
-pip install pytest pillow requests torch numpy   # torch normally comes from ComfyUI
+pip install pytest pillow requests torch numpy   # pillow/requests/torch come from ComfyUI in production
 python -m pytest tests
 ```
 

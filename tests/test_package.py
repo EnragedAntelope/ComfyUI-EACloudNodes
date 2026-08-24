@@ -153,17 +153,22 @@ def test_output_counts_match_what_execute_returns():
 
 
 def test_declared_dependencies_are_actually_imported():
-    """requirements.txt should list what the modules import, and nothing stale."""
+    """requirements.txt should list only what the modules import beyond what ComfyUI provides."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "requirements.txt"), encoding="utf-8") as handle:
         declared = {
             line.split(">=")[0].split("==")[0].strip().lower()
-            for line in handle if line.strip()
+            for line in handle
+            if line.strip() and not line.strip().startswith("#")
         }
     # torch/torchvision belong to ComfyUI's environment; declaring them risks
     # pip replacing a working CUDA build with a CPU-only wheel.
     assert "torch" not in declared
     assert "torchvision" not in declared
+    # Pillow and requests are in ComfyUI's own requirements.txt, so every real
+    # ComfyUI environment has them; declaring them only adds install steps.
+    assert "pillow" not in declared
+    assert "requests" not in declared
     sources = "".join(
         open(os.path.join(root, name), encoding="utf-8").read()
         for name in ("groq_node.py", "openrouter.py", "openrouter_models.py",

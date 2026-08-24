@@ -1,5 +1,25 @@
 ## Version History
 
+### v2.2.1 - Zero-dependency packaging
+
+ComfyUI's own requirements.txt has shipped both Pillow and requests for years,
+so listing them here made every fresh install run pip for packages that were
+guaranteed present already. Both manifests now declare nothing;
+requirements.txt remains as a commented stub because ComfyUI-Manager-style
+tooling and `test_package.py` expect the file to exist, and the dependency
+guard test now forbids all four ComfyUI-owned packages (torch, torchvision,
+pillow, requests) from creeping back in.
+
+The publish workflow's Node.js 20 deprecation warning was traced rather than
+guessed at: this repo pins `actions/checkout@v7.0.1` (the current latest
+release, node 24 runtime) and `Comfy-Org/publish-node-action@d2366e7`, but the
+latter's composite `action.yml` still calls `actions/setup-python@v5` and
+`actions/checkout@v4` internally. Upstream main has not moved since
+2025-05-10, so there is no newer commit to pin. Fixing it would mean forking
+a third-party action that runs with REGISTRY_ACCESS_TOKEN — exactly what the
+v2.2.0 supply-chain hardening avoids. Revisit when Comfy-Org publishes an
+update.
+
 ### v2.2.0 - External audit remediation
 
 An independent review of the v2.1.0 branch was verified finding-by-finding
