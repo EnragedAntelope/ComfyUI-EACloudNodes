@@ -6,7 +6,32 @@ Query and filter available models from OpenRouter's API.
 import json
 import requests
 
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import io
+
+
+def _as_float(value, default=0.0) -> float:
+    """Coerce an OpenRouter pricing value to float; missing/odd values fall back."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value, default=0) -> int:
+    """Coerce a numeric field (e.g. context_length) to int; None/odd values fall back."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_free_model(model: dict) -> bool:
+    """True when every priced dimension of the model is zero."""
+    pricing = model.get("pricing") or {}
+    return all(
+        _as_float(pricing.get(field, "0")) == 0
+        for field in ("prompt", "completion", "image", "request")
+    )
 
 
 class OpenRouterModels(io.ComfyNode):
@@ -31,7 +56,7 @@ class OpenRouterModels(io.ComfyNode):
                     "api_key",
                     default="",
                     multiline=False,
-                    tooltip="⚠️ Your OpenRouter API key from https://openrouter.ai/keys (Note: key will be visible - take care when sharing workflows)"
+                    tooltip="Optional. OpenRouter's model catalogue is public, so this can be left empty. Supply a key from https://openrouter.ai/keys only if you need it (Note: key will be visible - take care when sharing workflows)"
                 ),
                 io.String.Input(
                     "filter_text",
@@ -64,9 +89,10 @@ class OpenRouterModels(io.ComfyNode):
 
     @classmethod
     def validate_inputs(cls, api_key, **kwargs):
-        """Validate inputs before execution"""
-        if not api_key or not api_key.strip():
-            return "OpenRouter API key is required. Get one at https://openrouter.ai/keys"
+        """Validate inputs before execution.
+
+        The models endpoint is public, so no API key is required here.
+        """
         return True
 
     @classmethod
@@ -92,11 +118,10 @@ class OpenRouterModels(io.ComfyNode):
             - Status message indicating success/failure
         """
         try:
-            # Setup API request
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
+            # Setup API request. The catalogue is public; the key is only sent when given.
+            headers = {"Content-Type": "application/json"}
+            if api_key and api_key.strip():
+                headers["Authorization"] = f"Bearer {api_key.strip()}"
 
             # Make API request with timeout and error handling
             try:
@@ -145,7 +170,7 @@ class OpenRouterModels(io.ComfyNode):
 
             # Parse JSON response
             try:
-                models_data = response.json().get("data", [])
+                models_data = response.json().get("data") or []
             except json.JSONDecodeError:
                 return io.NodeOutput(
                     "",
@@ -155,6 +180,7 @@ class OpenRouterModels(io.ComfyNode):
             # Apply filters if provided
             if filter_text.strip():
                 filter_terms = filter_text.lower().split()
+                wants_free = 'free' in filter_terms
                 filtered_models = []
                 for model in models_data:
                     # Get all relevant text fields for text search
@@ -164,14 +190,8 @@ class OpenRouterModels(io.ComfyNode):
                         f"{model.get('description', '')}"
                     ).lower()
 
-                    # Check if model is actually free (pricing = 0)
-                    pricing = model.get('pricing', {})
-                    is_free = (
-                        float(pricing.get('prompt', '0')) == 0 and
-                        float(pricing.get('completion', '0')) == 0 and
-                        float(pricing.get('image', '0')) == 0 and
-                        float(pricing.get('request', '0')) == 0
-                    )
+                    # "free" is matched against actual pricing rather than the text
+                    is_free = _is_free_model(model) if wants_free else False
 
                     # For each filter term, check if it matches either:
                     # 1. The term is "free" and the model is actually free (pricing = 0)
@@ -190,17 +210,17 @@ class OpenRouterModels(io.ComfyNode):
             try:
                 if sort_by == "pricing":
                     models_data.sort(
-                        key=lambda x: float(x.get("pricing", {}).get("prompt", "0")),
+                        key=lambda x: _as_float((x.get("pricing") or {}).get("prompt", "0")),
                         reverse=(sort_order == "descending")
                     )
                 elif sort_by == "context_length":
                     models_data.sort(
-                        key=lambda x: x.get("context_length", 0),
+                        key=lambda x: _as_int(x.get("context_length")),
                         reverse=(sort_order == "descending")
                     )
                 else:  # sort by name
                     models_data.sort(
-                        key=lambda x: x.get("name", ""),
+                        key=lambda x: str(x.get("name") or ""),
                         reverse=(sort_order == "descending")
                     )
             except Exception as sort_err:
@@ -212,13 +232,17 @@ class OpenRouterModels(io.ComfyNode):
             # Format output with detailed model information and clear formatting
             model_list = []
             for model in models_data:
+                # `or {}` rather than a get() default: OpenRouter sends an explicit
+                # null pricing for some entries, and .get("pricing", {}) returns the
+                # None, not the default - one such entry would blank the whole list.
+                pricing = model.get("pricing") or {}
                 model_info = (
                     f"ID: {model.get('id')}\n"
                     f"Name: {model.get('name')}\n"
                     f"Context Length: {model.get('context_length')}\n"
                     f"Pricing (per token):\n"
-                    f"  Prompt: ${model.get('pricing', {}).get('prompt', 'N/A')}\n"
-                    f"  Completion: ${model.get('pricing', {}).get('completion', 'N/A')}\n"
+                    f"  Prompt: ${pricing.get('prompt', 'N/A')}\n"
+                    f"  Completion: ${pricing.get('completion', 'N/A')}\n"
                     f"{'=' * 40}\n"
                 )
                 model_list.append(model_info)
@@ -236,22 +260,16 @@ class OpenRouterModels(io.ComfyNode):
             )
 
         except Exception as e:
+            # ComfyUI's cancel signal must propagate, not become a node error.
+            # Matched by name so this module stays importable outside ComfyUI.
+            if type(e).__name__ == "InterruptProcessingException":
+                raise
             return io.NodeOutput(
                 "",
                 f"⚠️ Unexpected Error: {str(e)}.\n- Check all input parameters\n- If the error persists, report the issue"
             )
 
 
-class OpenRouterModelsExtension(ComfyExtension):
-    """Extension class for OpenRouter Models node"""
-
-    async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [OpenRouterModels]
-
-
-async def comfy_entrypoint() -> ComfyExtension:
-    """Entry point for ComfyUI v3"""
-    return OpenRouterModelsExtension()
 
 
 # Legacy v1 compatibility

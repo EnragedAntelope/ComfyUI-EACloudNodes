@@ -7,18 +7,33 @@ on:
     paths:
       - "pyproject.toml"
 
+# Least privilege: this workflow only reads the repo and talks to the Comfy
+# registry via REGISTRY_ACCESS_TOKEN — it never needs write scope on the repo.
 permissions:
-  issues: write
+  contents: read
 
 jobs:
   publish-node:
     name: Publish Custom Node to registry
     runs-on: ubuntu-latest
+    # Skip on forks so the action only runs in the source repository.
     if: ${{ github.repository_owner == 'EnragedAntelope' }}
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
-      - name: Publish Custom Node
-        uses: Comfy-Org/publish-node-action@v1
+        # Pinned to a commit SHA (v7.0.1). persist-credentials:false so the
+        # GITHUB_TOKEN isn't left in .git/config for the third-party step below.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }} ## Add your own personal access token to your Github Repository secrets and reference it here.
+          persist-credentials: false
+      - name: Publish Custom Node
+        # Pinned to an immutable commit SHA (not @v1, which is a mutable branch)
+        # so a future upstream change can't silently run with our registry token.
+        # This is the main branch HEAD as of 2026-08-24; the 1.0.1 release tag is
+        # NOT used because it calls `comfy --yes env`, which current comfy-cli
+        # rejects. Re-verify and bump this SHA when updating the action.
+        uses: Comfy-Org/publish-node-action@d2366e7abb6ab16f3bb03e3520ae25c8cf749bc9
+        with:
+          # The checkout above already fetched the repo, without persisting
+          # credentials; skip the action's own unhardened checkout step.
+          skip_checkout: 'true'
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

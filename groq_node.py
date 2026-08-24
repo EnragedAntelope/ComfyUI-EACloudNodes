@@ -5,15 +5,14 @@ Supports text and vision-language models through Groq's API.
 
 import json
 import requests
-import base64
 import time
 from PIL import Image
-import io as python_io
 import torch
-from torchvision.transforms import ToPILImage
-import random
 
-from comfy_api.latest import ComfyExtension, io
+# Relative: ComfyUI loads this folder as a package and never puts it on
+# sys.path, so an absolute `import chat_common` fails at registration time.
+from . import chat_common
+from comfy_api.latest import io
 
 # ============================================================================
 # MODULE-LEVEL CONSTANTS (Dynamic Model Fetching)
@@ -24,35 +23,55 @@ _groq_model_cache = {
     "models": None,
     "vision_models": None,
     "last_fetch": 0,
-    "cache_ttl": 300  # 5 minutes
+    "cache_ttl": 300,  # 5 minutes
+    "last_failure": 0,
+    "failure_backoff": 60  # don't re-try a failing fetch on every execution
 }
 
 # Model categorization mapping (hybrid approach - applied to fetched models)
+# Curated chat-capable models, mirroring Groq's own Production/Preview grouping.
+# Audio models are excluded because this node cannot call them at all; the
+# prompt-guard classifiers are excluded because a 512-token safety classifier is
+# not useful as a chat model here (they remain reachable via 'Manual Input').
 MODEL_CATEGORIES = {
     "Featured": ["groq/compound", "openai/gpt-oss-120b"],
-    "Production: Chat": ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
+    "Production: Chat": ["openai/gpt-oss-20b"],
     "Production: Systems": ["groq/compound-mini"],
-    "Production: Audio": ["whisper-large-v3", "whisper-large-v3-turbo"],
     "Preview: Chat": [
-        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "minimaxai/minimax-m2.7",
         "openai/gpt-oss-safeguard-20b",
-        "qwen/qwen3-32b",
-    ],
-    "Preview: Safety": [
-        "meta-llama/llama-prompt-guard-2-22m",
-        "meta-llama/llama-prompt-guard-2-86m",
-    ],
-    "Preview: Audio": [
-        "canopylabs/orpheus-arabic-saudi",
-        "canopylabs/orpheus-v1-english",
+        "qwen/qwen3.6-27b",
     ],
 }
 
-# Known vision models (hybrid detection: hardcoded list + pattern matching)
+# Speech-to-text and text-to-speech models are served by /audio/transcriptions and
+# /audio/speech, not /chat/completions, so they can never work in this node.
+AUDIO_MODEL_PATTERNS = ["whisper", "orpheus", "playai-tts", "tts-"]
+
+# Prefix used for the non-selectable category separators in the model dropdown.
+CATEGORY_SEPARATOR_PREFIX = "---"
+
+# Vision detection is advisory only - it shapes hints, never blocks a request.
+# Order of authority: modality metadata from the live API, then the naming
+# conventions below, then this seed list. Everything here may go stale without
+# breaking anything, because an image is always sent and Groq itself decides.
 KNOWN_VISION_MODELS = [
-    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "qwen/qwen3.6-27b",
 ]
-VISION_PATTERNS = ["vision", "vl", "-4-"]  # Patterns for detecting unknown vision models
+
+# Field names Groq has used, or may use, to describe a model's accepted inputs.
+MODALITY_FIELDS = ["input_modalities", "modalities", "supported_modalities"]
+
+VISION_PATTERNS = ["vision", "vl", "multimodal", "omni"]
+
+# Preferred defaults, most wanted first. The first one present in the resolved
+# model list wins; if none survive a Groq reshuffle, the first real model does.
+# This is what keeps a retired default from breaking the node out of the box.
+PREFERRED_DEFAULT_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "groq/compound",
+]
 
 # Static fallback list (used when API unavailable)
 STATIC_FALLBACK_MODELS = [
@@ -60,24 +79,13 @@ STATIC_FALLBACK_MODELS = [
     "groq/compound",
     "openai/gpt-oss-120b",
     "--- Production: Chat ---",
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
     "openai/gpt-oss-20b",
     "--- Production: Systems ---",
     "groq/compound-mini",
-    "--- Production: Audio ---",
-    "whisper-large-v3",
-    "whisper-large-v3-turbo",
     "--- Preview: Chat ---",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "minimaxai/minimax-m2.7",
     "openai/gpt-oss-safeguard-20b",
-    "qwen/qwen3-32b",
-    "--- Preview: Safety ---",
-    "meta-llama/llama-prompt-guard-2-22m",
-    "meta-llama/llama-prompt-guard-2-86m",
-    "--- Preview: Audio ---",
-    "canopylabs/orpheus-arabic-saudi",
-    "canopylabs/orpheus-v1-english",
+    "qwen/qwen3.6-27b",
     "Manual Input",
 ]
 
@@ -85,6 +93,31 @@ STATIC_FALLBACK_MODELS = [
 # ============================================================================
 # MODULE-LEVEL FUNCTIONS (Dynamic Model Fetching)
 # ============================================================================
+
+def _is_audio_model(model_id: str, model: dict = None) -> bool:
+    """
+    True for speech-to-text / text-to-speech models, which this node cannot call.
+
+    A model entry that positively reports text output is taken at its word, so a
+    future chat model whose name happens to trip a pattern is never excluded.
+    Naming conventions are only the fallback for entries carrying no metadata.
+    """
+    if model:
+        for field in ("output_modalities", "output_modality"):
+            value = model.get(field)
+            if isinstance(value, list) and value:
+                return not any(str(item).lower() == "text" for item in value)
+            if isinstance(value, str) and value:
+                return "text" not in value.lower()
+
+    lowered = model_id.lower()
+    return any(pattern in lowered for pattern in AUDIO_MODEL_PATTERNS)
+
+
+def _is_category_separator(model_id: str) -> bool:
+    """True for the '--- Category ---' rows used to group the dropdown."""
+    return model_id.strip().startswith(CATEGORY_SEPARATOR_PREFIX)
+
 
 def _get_static_fallback_models() -> tuple[list[str], list[str]]:
     """Return comprehensive static fallback list."""
@@ -101,116 +134,167 @@ def _categorize_groq_models(api_models: list[dict]) -> list[str]:
     for category, model_list in MODEL_CATEGORIES.items():
         for model_id in model_list:
             model_to_category[model_id] = category
-    
+
     # Group fetched models by category
     categorized = {cat: [] for cat in MODEL_CATEGORIES.keys()}
     categorized["Other"] = []
-    
+
     for model in api_models:
         model_id = model.get("id", "")
         if not model_id or not model.get("active", True):
             continue
-        
+
+        # Audio models use different endpoints and cannot be called from this node
+        if _is_audio_model(model_id, model):
+            continue
+
         # Find matching category
         if model_id in model_to_category:
             categorized[model_to_category[model_id]].append(model_id)
         else:
             categorized["Other"].append(model_id)
-    
+
     # Build final list with category headers
     result = []
     for category in MODEL_CATEGORIES.keys():
         if categorized[category]:
             result.append(f"--- {category} ---")
             result.extend(sorted(categorized[category]))
-    
+
     if categorized["Other"]:
         result.append("--- Other ---")
         result.extend(sorted(categorized["Other"]))
-    
+
     result.append("Manual Input")
     return result
 
 
+def _model_reports_image_input(model: dict):
+    """
+    Read image capability out of a Groq model entry's own metadata.
+
+    Groq has not committed to a modality field, so several plausible names are
+    checked. Returns None when the entry says nothing, which the caller treats
+    as "unknown" rather than "no" - that is what stops this going stale.
+    """
+    for field in MODALITY_FIELDS:
+        value = model.get(field)
+        if isinstance(value, list) and value:
+            return any(str(item).lower() == "image" for item in value)
+        if isinstance(value, str) and value:
+            # e.g. "text+image->text"; only the input side counts
+            return "image" in value.split("->")[0].lower()
+    return None
+
+
 def _detect_vision_models(api_models: list[dict]) -> list[str]:
     """
-    Detect vision-capable models using hybrid approach:
-    1. Include all KNOWN_VISION_MODELS that exist in API response
-    2. Pattern-match model IDs for vision indicators
+    Collect the models that look vision-capable, most authoritative signal first:
+    the entry's own modality metadata, then naming conventions, then the seed list.
+
+    This only feeds hints, so a miss costs a less specific error message rather
+    than a blocked request.
     """
     vision_models = []
-    
+
     for model in api_models:
         model_id = model.get("id", "")
-        if not model_id or not model.get("active", True):
+        if not model_id or not model.get("active", True) or _is_audio_model(model_id, model):
             continue
-        
-        # Check hardcoded list
-        if model_id in KNOWN_VISION_MODELS:
-            vision_models.append(model_id)
+
+        reported = _model_reports_image_input(model)
+        if reported is not None:
+            if reported:
+                vision_models.append(model_id)
             continue
-        
-        # Pattern matching
-        if any(pattern in model_id.lower() for pattern in VISION_PATTERNS):
+
+        if (model_id in KNOWN_VISION_MODELS or
+                any(pattern in model_id.lower() for pattern in VISION_PATTERNS)):
             vision_models.append(model_id)
-    
+
     return vision_models
+
+
+def _pick_default_model(models: list[str]) -> str:
+    """
+    Choose a default that exists in the given list.
+
+    Groq retires models regularly - a hardcoded default that disappears makes the
+    node fail on a fresh drop-in, so fall back through preferences and then to
+    whatever the list actually offers.
+    """
+    for preferred in PREFERRED_DEFAULT_MODELS:
+        if preferred in models:
+            return preferred
+    for model_id in models:
+        if not _is_category_separator(model_id) and model_id != "Manual Input":
+            return model_id
+    return "Manual Input"
 
 
 def _fetch_groq_models(api_key: str = None) -> tuple[list[str], list[str]]:
     """
     Fetch available models from Groq API with 5-minute caching.
-    
+
     Args:
         api_key: Optional Groq API key. If not provided, returns static fallback.
-    
+
     Returns:
         tuple: (categorized_model_list, vision_model_list)
                Returns static fallback if API call fails or no key provided.
     """
     now = time.time()
-    
-    # Return cached results if still fresh
-    if (_groq_model_cache["models"] is not None and
-            now - _groq_model_cache["last_fetch"] < _groq_model_cache["cache_ttl"]):
-        return _groq_model_cache["models"], _groq_model_cache["vision_models"]
-    
-    # If no API key, return static fallback
-    if not api_key or not api_key.strip():
-        return _get_static_fallback_models()
-    
-    try:
-        # Fetch from Groq API
-        response = requests.get(
-            "https://api.groq.com/openai/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=5
-        )
-        
-        if response.status_code != 200:
-            raise Exception(f"API returned status {response.status_code}")
-        
-        data = response.json().get("data", [])
-        
-        # Build categorized model list
-        categorized_models = _categorize_groq_models(data)
-        
-        # Detect vision-capable models
-        vision_models = _detect_vision_models(data)
-        
-        # Update cache
-        _groq_model_cache["models"] = categorized_models
-        _groq_model_cache["vision_models"] = vision_models
-        _groq_model_cache["last_fetch"] = now
-        
-        return categorized_models, vision_models
-        
-    except Exception:
-        # Return previously cached results if available
-        if _groq_model_cache["models"] is not None:
+
+    with chat_common.LOCK:
+        # Return cached results if still fresh
+        if (_groq_model_cache["models"] is not None and
+                now - _groq_model_cache["last_fetch"] < _groq_model_cache["cache_ttl"]):
             return _groq_model_cache["models"], _groq_model_cache["vision_models"]
-        # Return static fallback
-        return _get_static_fallback_models()
+
+        # If no API key, return static fallback
+        if not api_key or not api_key.strip():
+            return _get_static_fallback_models()
+
+        # Back off after a failure too, so a broken key or an offline host does not
+        # add a request (and its timeout) to every single node execution.
+        if now - _groq_model_cache["last_failure"] < _groq_model_cache["failure_backoff"]:
+            if _groq_model_cache["models"] is not None:
+                return _groq_model_cache["models"], _groq_model_cache["vision_models"]
+            return _get_static_fallback_models()
+
+        try:
+            # Fetch from Groq API
+            response = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=5
+            )
+
+            if response.status_code != 200:
+                raise Exception(f"API returned status {response.status_code}")
+
+            data = response.json().get("data", [])
+
+            # Build categorized model list
+            categorized_models = _categorize_groq_models(data)
+
+            # Detect vision-capable models
+            vision_models = _detect_vision_models(data)
+
+            # Update cache
+            _groq_model_cache["models"] = categorized_models
+            _groq_model_cache["vision_models"] = vision_models
+            _groq_model_cache["last_fetch"] = now
+
+            return categorized_models, vision_models
+
+        except Exception:
+            _groq_model_cache["last_failure"] = now
+            # Return previously cached results if available
+            if _groq_model_cache["models"] is not None:
+                return _groq_model_cache["models"], _groq_model_cache["vision_models"]
+            # Return static fallback
+            return _get_static_fallback_models()
 
 
 # ============================================================================
@@ -226,11 +310,19 @@ class GroqNode(io.ComfyNode):
     # JavaScript safe integer limit (2^53 - 1)
     MAX_SAFE_INTEGER = 9007199254740991
 
-    # Class-level storage for seed tracking per node instance
+    # Class-level storage for seed counters, keyed by (model, starting seed)
     _last_seed = {}
+
+    # Upper bound on tracked seed counters, so the dict cannot grow without bound
+    MAX_TRACKED_SEEDS = 1024
 
     @classmethod
     def define_schema(cls) -> io.Schema:
+        # Resolved together so the default is always one of the offered options,
+        # whatever Groq's catalogue looks like on the day.
+        model_options = _fetch_groq_models(api_key=None)[0]
+        default_model = _pick_default_model(model_options)
+
         return io.Schema(
             node_id="GroqNode",
             display_name="Groq Chat",
@@ -245,9 +337,9 @@ class GroqNode(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "model",
-                options=_fetch_groq_models(api_key=None)[0],
-                    default="llama-3.3-70b-versatile",
-                tooltip="Select a Groq model or choose 'Manual Input'. Categories: Featured, Production (stable), Preview (evaluation). Use ComfyUI Refresh to update model list from Groq API."
+                    options=model_options,
+                    default=default_model,
+                    tooltip="Select a Groq model or choose 'Manual Input'. Categories: Featured, Production (stable), Preview (evaluation). Use ComfyUI Refresh to update model list from Groq API."
                 ),
                 io.String.Input(
                     "manual_model",
@@ -271,7 +363,7 @@ class GroqNode(io.ComfyNode):
                     "send_system",
                     options=["yes", "no"],
                     default="yes",
-                    tooltip="Toggle system prompt sending. Set to 'no' for vision models that don't accept system prompts (e.g., Llama-4 vision models)."
+                    tooltip="Toggle system prompt sending. Set to 'no' for models that reject system prompts, which is common for vision models."
                 ),
                 io.Float.Input(
                     "temperature",
@@ -350,7 +442,13 @@ class GroqNode(io.ComfyNode):
                 io.Image.Input(
                     "image_input",
                     optional=True,
-                    tooltip="Optional image input for vision-capable models. Currently supported: meta-llama/llama-4-scout-17b-16e-instruct. Maximum size: 2048x2048."
+                    tooltip="Optional image input for vision-capable models (qwen/qwen3.6-27b at time of writing). The image is always sent and Groq decides whether the model accepts it, so newly released vision models work without updating this node. Maximum size: 2048x2048 (only the first image of a batch is sent)."
+                ),
+                io.Combo.Input(
+                    "image_format",
+                    options=["png", "jpeg"],
+                    default="png",
+                    tooltip="Encoding for the attached image. PNG is lossless (best for screenshots and text); JPEG produces a much smaller request for photographic content, cutting latency and token overhead."
                 ),
                 io.String.Input(
                     "additional_params",
@@ -382,20 +480,45 @@ class GroqNode(io.ComfyNode):
             return "Groq API key is required. Get one at https://console.groq.com/keys"
 
         # Validate model selection
-        actual_model = manual_model if model == "Manual Input" else model
         if model == "Manual Input" and (not manual_model or not manual_model.strip()):
             return "Manual model identifier is required when 'Manual Input' is selected"
 
+        # Category headers are group labels, not selectable models
+        if _is_category_separator(model):
+            return f"'{model}' is a category label, not a model. Please select a model from the dropdown."
+
+        # Audio models are served by different Groq endpoints and cannot be used here
+        actual_model = manual_model if model == "Manual Input" else model
+        if actual_model and _is_audio_model(actual_model):
+            return (
+                f"'{actual_model}' is a speech model served by Groq's audio endpoints "
+                "and cannot be used for chat completions. Please select a chat model."
+            )
 
         # Validate additional_params if provided
         additional_params = kwargs.get("additional_params", "")
         if additional_params and additional_params.strip():
             try:
-                json.loads(additional_params)
+                parsed = json.loads(additional_params)
             except json.JSONDecodeError:
                 return "Invalid JSON in additional parameters. Example format: {\"stop\": [\"\\n\"]}"
+            if not isinstance(parsed, dict):
+                return "Additional parameters must be a JSON object. Example format: {\"stop\": [\"\\n\"]}"
 
         return True
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        """
+        Equivalent of V1's IS_CHANGED.
+
+        The seed is derived inside execute(), so with unchanged widgets ComfyUI would
+        serve a cached response and the non-fixed seed modes would never take effect.
+        Returning NaN marks the node dirty whenever the seed is meant to move.
+        """
+        if kwargs.get("seed_mode", "fixed") != "fixed":
+            return float("nan")
+        return kwargs.get("seed_value", 0)
 
     @classmethod
     def execute(
@@ -416,6 +539,7 @@ class GroqNode(io.ComfyNode):
         seed_value: int,
         max_retries: int,
         debug_mode: str,
+        image_format: str = "png",
         image_input=None,
         additional_params: str = ""
     ) -> io.NodeOutput:
@@ -428,69 +552,54 @@ Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 
 Key Settings:
 - API Key: Get from https://console.groq.com/keys
-  * Used to fetch latest model list from Groq API (5-minute cache)
-- Model: Dynamically fetched from Groq API with categories:
-  * Featured: groq/compound, openai/gpt-oss-120b
-  * Production: Stable models for production use (llama-3.3-70b-versatile default)
-  * Preview: Experimental models (may be deprecated)
-  * Use ComfyUI's Refresh button to update model list from Groq API
-  * Falls back to static list if API unavailable
-- System Prompt: Set AI behavior/context (disable for vision models)
-Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
-
-Key Settings:
-- API Key: Get from https://console.groq.com/keys
-- Model: Choose from dropdown or use Manual Input
-  * Featured: groq/compound, openai/gpt-oss-120b
-  * Production Chat: llama-3.3-70b-versatile (default), llama-3.1-8b-instant, etc.
-  * Preview Chat: llama-4-scout (vision), kimi-k2, qwen3-32b, etc.
-- System Prompt: Set AI behavior/context (disable for vision models)
-- User Prompt: Main input for the model
-- Send System: Toggle system prompt (off for vision models)
+  * Also used to refresh the model list from the Groq API
+- Model: Pick from the dropdown or choose 'Manual Input'
+  * Featured: groq/compound, openai/gpt-oss-120b (default)
+  * Production: stable models (openai/gpt-oss-120b is the default)
+  * Preview: experimental models, may be deprecated without notice
+  * Rows shown as '--- Category ---' are labels, not selectable models
+  * Speech models (Whisper, Orpheus) are excluded and rejected if entered:
+    they use Groq's audio endpoints, not chat completions
+  * The prompt-guard safety classifiers are left out of the curated list too
+    (512-token classifiers); reach them with 'Manual Input' if you need them
+- Manual Model: custom model id, used only when 'Manual Input' is selected
+- System Prompt: sets AI behavior/context
+- User Prompt: main input for the model (required)
+- Send System: set to 'no' for vision models that reject system prompts
 - Temperature: 0.0 (focused) to 2.0 (creative)
-- Top-p: Nucleus sampling threshold (0.0-1.0)
-- Max Tokens: Response length limit (varies by model)
-- Frequency Penalty: Reduce token frequency (-2.0 to 2.0)
-- Presence Penalty: Encourage topic diversity (-2.0 to 2.0)
-- Response Format: Text or JSON object output
-- Seed Mode: Fixed/random/increment/decrement for reproducibility
-- Seed Value: Seed for 'fixed' mode (0-9007199254740991)
-- Max Retries: Auto-retry on errors (0-5)
-- Debug Mode: Enable for detailed error messages
+- Top-p: nucleus sampling threshold (0.0-1.0)
+- Max Completion Tokens: response length limit (varies by model)
+- Frequency Penalty: reduce token frequency (-2.0 to 2.0), sent only when non-zero
+- Presence Penalty: encourage topic diversity (-2.0 to 2.0), sent only when non-zero
+- Response Format: text or JSON object output
+- Seed Mode: fixed / random / increment / decrement
+- Seed Value: seed used by 'fixed' mode (0-9007199254740991)
+- Max Retries: auto-retry on rate limits and 5xx errors (0-5)
+- Debug Mode: include the request body in 400-error messages (image data
+  is summarized rather than dumped)
 
 Optional:
-- Image Input: For vision-capable models (auto-detected)
-  * Known: meta-llama/llama-4-scout-17b-16e-instruct
-  * Pattern detection: models with 'vision', 'vl', or '-4-' in ID
-  * Max size: 2048x2048 per dimension
-- Additional Params: Extra model parameters in JSON
+- Image Input: for vision-capable models (qwen/qwen3.6-27b at time of writing)
+  * An attached image is ALWAYS sent. This node does not second-guess which
+    models accept images - Groq decides, so a vision model released after this
+    node shipped works immediately, with no update here
+  * If Groq refuses it, the error carries a hint about what did look capable
+  * Max size: 2048x2048 per dimension; only the first image of a batch is sent
+- Image Format: PNG (lossless) or JPEG (smaller payload for photos)
+- Additional Params: extra Groq parameters as a JSON object, merged into the
+  request body (it overrides the widgets above on key collisions)
 
 Vision Models:
 1. Connect an image to image_input
-2. Select a vision-capable model (auto-detected from Groq API)
-3. Set 'send_system' to 'no' (vision models don't accept system prompts)
+2. Select a vision-capable model
+3. Set 'send_system' to 'no' (vision models often reject system prompts)
 4. Describe what you want to know about the image in user_prompt
 
 Model List:
-- Fetched from Groq API when API key is provided
-- Cached for 5 minutes to reduce API calls
-- Falls back to comprehensive static list if API unavailable
-- Categories help identify model stability and purpose
-- Use ComfyUI Refresh button to update from Groq API
-- Image Input: For Llama-4 Scout vision model only
-  * meta-llama/llama-4-scout-17b-16e-instruct
-  * Max size: 2048x2048 per dimension
-- Additional Params: Extra model parameters in JSON
-
-Vision Models:
-1. Connect an image to image_input
-2. Select meta-llama/llama-4-scout-17b-16e-instruct
-3. Set 'send_system' to 'no'
-4. Describe what you want to know about the image in user_prompt
-
-Production vs Preview Models:
-- Production: Stable, reliable, recommended for production use
-- Preview: Experimental, may be deprecated, for evaluation only
+- Ships with a static list of known chat models
+- Run the node once with a valid API key, then use ComfyUI's Refresh button to
+  replace the dropdown with the live list from the Groq API (cached 5 minutes)
+- Falls back to the static list whenever the API is unreachable
 
 For full documentation and examples, visit:
 https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
@@ -512,42 +621,61 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             if not user_prompt or not user_prompt.strip():
                 return io.NodeOutput("", "User prompt is required", help_text)
 
-
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model.strip() if model == "Manual Input" else model
 
-            # Handle seed based on mode
-            # Key by (model, seed_value) so each node instance gets its own counter
+            if _is_category_separator(actual_model):
+                return io.NodeOutput(
+                    "",
+                    f"Error: '{actual_model}' is a category label, not a model. Please select a model from the dropdown.",
+                    help_text
+                )
+
+            if _is_audio_model(actual_model):
+                return io.NodeOutput(
+                    "",
+                    f"Error: '{actual_model}' is a speech model served by Groq's audio endpoints "
+                    "and cannot be used for chat completions. Please select a chat model.",
+                    help_text
+                )
+
+            # Handle seed based on mode.
+            # Counters are keyed by (model, starting seed) and capped so long-running
+            # sessions cannot grow this dict without bound.
             node_key = (actual_model, seed_value)
-            if seed_mode == "random":
-                seed = random.randint(0, cls.MAX_SAFE_INTEGER)
-            elif seed_mode == "increment":
-                last_seed = cls._last_seed.get(node_key, seed_value)
-                seed = (last_seed + 1) % cls.MAX_SAFE_INTEGER
-            elif seed_mode == "decrement":
-                last_seed = cls._last_seed.get(node_key, seed_value)
-                seed = (last_seed - 1) if last_seed > 0 else cls.MAX_SAFE_INTEGER
-            else:  # "fixed"
-                seed = seed_value
+            with chat_common.LOCK:
+                seed = chat_common.derive_seed(
+                    cls._last_seed, node_key, seed_mode, seed_value, cls.MAX_SAFE_INTEGER)
+                chat_common.store_seed(
+                    cls._last_seed, node_key, seed, cls.MAX_TRACKED_SEEDS)
 
-            # Store the seed we're using
-            cls._last_seed[node_key] = seed
-
-            # Check if model supports vision capabilities (dynamic detection)
-            _, vision_models = _fetch_groq_models(api_key=None)
+            # Warm the module cache so a later ComfyUI Refresh can rebuild the
+            # dropdown from the live Groq model list.
+            _, vision_models = _fetch_groq_models(api_key=api_key)
             if vision_models is None:
                 vision_models = KNOWN_VISION_MODELS
+
+            # Deliberately NOT a gate. Refusing an image on the strength of a
+            # capability list means every Groq model reshuffle silently blocks a
+            # model that actually works. The image is always sent; Groq rejects it
+            # if the model cannot take it, and that 400 is annotated below with
+            # whichever models did look capable at the time.
             is_vision_model = (
                 actual_model in vision_models or
                 any(pattern in actual_model.lower() for pattern in VISION_PATTERNS)
             )
 
-            # Vision model validation
+            # Appended to a 400 when an image was attached to a model that did not
+            # look vision-capable, turning Groq's generic complaint into a lead.
+            vision_hint = ""
             if image_input is not None and not is_vision_model:
-                return io.NodeOutput(
-                    "",
-                    f"Error: Model '{actual_model}' does not support vision inputs. Vision-capable models are auto-detected from Groq API. Currently known: {', '.join(vision_models)}",
-                    help_text
+                capable = [m for m in vision_models if not _is_category_separator(m)]
+                vision_hint = (
+                    f"\n\nHint: an image was attached and '{actual_model}' did not look "
+                    "vision-capable. "
+                    + (f"Models that currently do: {', '.join(capable)}."
+                       if capable else
+                       "No model in the current list advertises image input.")
                 )
 
             # Initialize messages list
@@ -560,46 +688,19 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     "content": system_prompt
                 })
 
-            # Handle different message formats based on whether it's a vision model with image
-            if image_input is not None and is_vision_model:
+            # An attached image is always forwarded. Choosing the text-only shape
+            # here on a capability guess would silently drop the user's image.
+            if image_input is not None:
                 try:
-                    # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
-                        if image_input.dim() == 4:
-                            image_input = image_input.squeeze(0)
-                        if image_input.dim() != 3:
-                            return io.NodeOutput("", "Error: Image tensor must be 3D after squeezing", help_text)
-
-                        if image_input.shape[-1] in [1, 3, 4]:
-                            image_input = image_input.permute(2, 0, 1)
-
-                        pil_image = ToPILImage()(image_input)
+                        pil_image = chat_common.tensor_to_pil(image_input)
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
                     else:
                         return io.NodeOutput("", "Error: Unsupported image input type", help_text)
 
-                    # Validate image dimensions (max 2048 in either dimension)
-                    if pil_image.size[0] > 2048 or pil_image.size[1] > 2048:
-                        return io.NodeOutput(
-                            "",
-                            f"Error: Image too large ({pil_image.size[0]}x{pil_image.size[1]}). Maximum is 2048 pixels in either dimension. Please resize your image.",
-                            help_text
-                        )
-
-                    # Convert image to base64
-                    buffered = python_io.BytesIO()
-                    pil_image.save(buffered, format="PNG")
-                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-                    # Add user message with image for vision models
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
-                        ]
-                    })
+                    messages.append(chat_common.encode_image_message(
+                        pil_image, user_prompt, image_format))
                 except Exception as img_err:
                     return io.NodeOutput("", f"Image Processing Error: {str(img_err)}", help_text)
             else:
@@ -615,12 +716,10 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
-                "max_tokens": max_completion_tokens
+                # Groq deprecated "max_tokens" in favour of "max_completion_tokens"
+                "max_completion_tokens": max_completion_tokens,
+                "seed": seed
             }
-
-            # Add seed
-            if seed is not None:
-                body["seed"] = seed
 
             # Only add penalty parameters if non-zero (not all models support them)
             if frequency_penalty != 0:
@@ -637,100 +736,83 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             if additional_params and additional_params.strip():
                 try:
                     extra_params = json.loads(additional_params)
-                    body.update(extra_params)
                 except json.JSONDecodeError:
                     return io.NodeOutput("", "Error: Invalid JSON in additional parameters. Example format: {\"stop\": [\"\\n\"]}", help_text)
+                if not isinstance(extra_params, dict):
+                    return io.NodeOutput("", "Error: Additional parameters must be a JSON object. Example format: {\"stop\": [\"\\n\"]}", help_text)
+                body.update(extra_params)
 
-            # Make API request with retry logic
-            retries = 0
-            while True:
+            response, transport_error = chat_common.post_with_retries(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                body=body,
+                max_retries=max_retries,
+            )
+
+            if transport_error is not None:
+                return io.NodeOutput("", transport_error, help_text)
+
+            # Handle 400 errors with detailed information
+            if response.status_code == 400:
                 try:
-                    response = requests.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json=body,
-                        timeout=120
+                    error_json = response.json()
+                    error_message = error_json.get("error", {}).get("message", "Unknown error")
+
+                    if debug_mode == "on":
+                        return io.NodeOutput(
+                            "",
+                            f"Error 400: {error_message}{vision_hint}"
+                            f"\n\nRequest body:\n{json.dumps(chat_common.redact_body(body), indent=2)}",
+                            help_text
+                        )
+                    else:
+                        return io.NodeOutput("", f"Error 400: {error_message}{vision_hint}", help_text)
+                except Exception:
+                    return io.NodeOutput(
+                        "",
+                        "Error: Bad request - check model name and parameters (enable debug mode for details)",
+                        help_text
                     )
 
-                    # Define retryable status codes
-                    retryable_codes = {429, 500, 502, 503, 504}
+            # Handle other response codes
+            if response.status_code == 401:
+                return io.NodeOutput("", "Error: Invalid API key", help_text)
+            elif response.status_code == 429:
+                return io.NodeOutput(
+                    "", f"Error: Rate limit exceeded even after {max_retries + 1} attempt(s)", help_text)
+            elif response.status_code != 200:
+                return io.NodeOutput(
+                    "", f"Error: API returned status {response.status_code}", help_text)
 
-                    if response.status_code in retryable_codes and retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)  # Exponential backoff: 2, 4, 8, 16... seconds
-                        continue
+            try:
+                response_json = response.json()
+            except requests.exceptions.JSONDecodeError:
+                # A 200 with a malformed body is not worth retrying
+                return io.NodeOutput("", "Error: Invalid JSON response from Groq", help_text)
 
-                    # Handle 400 errors with detailed information
-                    if response.status_code == 400:
-                        try:
-                            error_json = response.json()
-                            error_message = error_json.get("error", {}).get("message", "Unknown error")
+            # Extract information for status
+            model_used = response_json.get("model", "unknown")
+            tokens = response_json.get("usage", {})
+            prompt_tokens = tokens.get("prompt_tokens", 0)
+            completion_tokens = tokens.get("completion_tokens", 0)
+            total_tokens = prompt_tokens + completion_tokens
 
-                            if debug_mode == "on":
-                                return io.NodeOutput(
-                                    "",
-                                    f"Error 400: {error_message}\n\nRequest body:\n{json.dumps(body, indent=2)}",
-                                    help_text
-                                )
-                            else:
-                                return io.NodeOutput("", f"Error 400: {error_message}", help_text)
-                        except Exception:
-                            return io.NodeOutput(
-                                "",
-                                "Error: Bad request - check model name and parameters (enable debug mode for details)",
-                                help_text
-                            )
+            status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
 
-                    # Handle other response codes
-                    if response.status_code == 401:
-                        return io.NodeOutput("", "Error: Invalid API key", help_text)
-                    elif response.status_code == 429:
-                        return io.NodeOutput("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
-                    elif response.status_code != 200:
-                        return io.NodeOutput("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
-
-                    response_json = response.json()
-
-                    # Extract information for status
-                    model_used = response_json.get("model", "unknown")
-                    tokens = response_json.get("usage", {})
-                    prompt_tokens = tokens.get("prompt_tokens", 0)
-                    completion_tokens = tokens.get("completion_tokens", 0)
-                    total_tokens = prompt_tokens + completion_tokens
-
-                    status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
-
-                    if "choices" in response_json and len(response_json["choices"]) > 0:
-                        content = response_json["choices"][0].get("message", {}).get("content", "")
-                        return io.NodeOutput(content, status_msg, help_text)
-                    else:
-                        return io.NodeOutput("", "Error: No response content from model", help_text)
-
-                except requests.exceptions.RequestException as req_err:
-                    # Retry network-related errors
-                    if retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)
-                        continue
-                    return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
+            if "choices" in response_json and len(response_json["choices"]) > 0:
+                content = response_json["choices"][0].get("message", {}).get("content", "")
+                return io.NodeOutput(content, status_msg, help_text)
+            else:
+                return io.NodeOutput("", "Error: No response content from model", help_text)
 
         except Exception as e:
+            # ComfyUI's cancel signal must propagate, not become a chat error.
+            if type(e).__name__ == "InterruptProcessingException":
+                raise
             return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)
-
-
-class GroqExtension(ComfyExtension):
-    """Extension class for Groq nodes"""
-
-    async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [GroqNode]
-
-
-async def comfy_entrypoint() -> ComfyExtension:
-    """Entry point for ComfyUI v3"""
-    return GroqExtension()
 
 
 # Legacy v1 compatibility (for nodes that still use old API)

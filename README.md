@@ -2,11 +2,12 @@
 
 A collection of [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes for interacting with various cloud services, such as LLM providers Groq and OpenRouter. These nodes are designed to work with any ComfyUI instance, including cloud-hosted environments where users may have limited system access.
 
-**Note:** All nodes have been updated to ComfyUI v3 spec for enhanced reliability, validation, and features while maintaining backward compatibility with v1.
+**Note:** All nodes use the ComfyUI v3 node spec (`comfy_api.latest`) and are also
+registered through the legacy `NODE_CLASS_MAPPINGS` path.
 
 ## Installation
 
-Use [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) or to manually install:
+Use [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager), or install manually:
 
 1. Clone this repository into your ComfyUI custom_nodes folder:
   ```bash
@@ -38,6 +39,7 @@ The following parameters are available in both OpenRouter and Groq nodes:
 - `seed_mode`: Control reproducibility (Fixed, Random, Increment, Decrement)
 - `max_retries`: Maximum retry attempts (0-5) for recoverable errors
 - `image_input`: Optional image for vision-capable models
+- `image_format`: Encoding for `image_input` — PNG (lossless) or JPEG (much smaller payload for photos)
 - `additional_params`: Optional JSON object for extra model parameters
 
 #### Common Outputs:
@@ -51,19 +53,9 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 
 #### Features:
 - **ComfyUI v3 compatible** - Enhanced reliability and validation
-- **Dynamic model fetching** - Model list automatically fetched from Groq API (5-min cache)
+- **Live model list** - the dropdown can be rebuilt from the Groq API (5-min cache)
 - High-speed inference with Groq's optimized hardware
-- Comprehensive model selection including production and preview models
-- Support for vision-capable models (Llama-4 Maverick and Scout)
-- Real-time token usage tracking
-- Automatic retry mechanism with exponential backoff
-- Enhanced input validation
-- Detailed tooltips for all parameters
-- Debug mode for troubleshooting
-- **ComfyUI v3 compatible** - Enhanced reliability and validation
-- High-speed inference with Groq's optimized hardware
-- Comprehensive model selection including production and preview models
-- Support for vision-capable models (Llama-4 Maverick and Scout)
+- Support for vision-capable models
 - Real-time token usage tracking
 - Automatic retry mechanism with exponential backoff
 - Enhanced input validation
@@ -72,31 +64,35 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 
 #### Available Models:
 
-**Note:** Model list is dynamically fetched from Groq API when you provide your API key. Categories below are maintained for reference. Use ComfyUI's Refresh button to update the model list.
+The node ships with a static list of known chat models. To pick up newly released
+models, run the node once with a valid API key and then press ComfyUI's **Refresh**
+button — the dropdown is rebuilt from `GET /openai/v1/models` (cached for 5 minutes,
+falling back to the static list whenever the API is unreachable).
 
-**Production Models** (Stable, recommended for production use):
+Rows shown as `--- Category ---` are group labels, not selectable models.
 
-**Production Models** (Stable, recommended for production use):
-- `llama-3.1-8b-instant` - Fast 8B parameter model (560 T/sec)
-- `llama-3.3-70b-versatile` - **Default** - Powerful 70B model (280 T/sec)
-- `meta-llama/llama-guard-4-12b` - Safety and moderation model (1200 T/sec)
-- `openai/gpt-oss-120b` - Large open-source GPT (500 T/sec)
-- `openai/gpt-oss-20b` - Efficient open-source GPT (1000 T/sec)
-- `whisper-large-v3` - Speech recognition model
-- `whisper-large-v3-turbo` - Faster speech recognition
+**Featured:**
+- `openai/gpt-oss-120b` - **Default** - 131K context, 500 T/sec
+- `groq/compound` - Agentic system with web search and code execution
 
-**Production Systems** (Agentic systems with tools):
-- `groq/compound` - Multi-model system with tools
+**Production: Chat** (stable, recommended for production use):
+- `openai/gpt-oss-20b` - Faster and cheaper, 131K context, 1000 T/sec
+
+**Production: Systems:**
 - `groq/compound-mini` - Lightweight agentic system
 
-**Preview Models** (Experimental, for evaluation only):
-- `meta-llama/llama-4-scout-17b-16e-instruct` - **Vision** (750 T/sec)
-- `meta-llama/llama-prompt-guard-2-22m` - Prompt injection detection
-- `meta-llama/llama-prompt-guard-2-86m` - Enhanced prompt guard
-- `openai/gpt-oss-safeguard-20b` - Safety-focused model (1000 T/sec)
-- `canopylabs/orpheus-arabic-saudi` - Arabic text-to-speech
-- `canopylabs/orpheus-v1-english` - English text-to-speech
-- `qwen/qwen3-32b` - Qwen 32B model (400 T/sec)
+**Preview: Chat** (experimental, may be discontinued at short notice):
+- `minimaxai/minimax-m2.7` - 196K context, 131K max completion
+- `openai/gpt-oss-safeguard-20b` - Safety-focused reasoning model
+- `qwen/qwen3.6-27b` - **Vision**, 131K context, accepts files up to 20 MB
+
+> **Not offered in the dropdown:**
+> - Groq's speech models (Whisper, Orpheus) are served by `/audio/transcriptions`
+>   and `/audio/speech`, so they cannot answer a chat-completions request at all.
+>   Selecting one is rejected with a clear message.
+> - The `llama-prompt-guard-2-*` classifiers work over chat completions but have a
+>   512-token window and return a safety score rather than prose, so they are left
+>   out of the curated list. Reach them with `Manual Input` if you want them.
 
 #### Parameters:
 - `api_key`: ⚠️ Your Groq API key (Get from [console.groq.com/keys](https://console.groq.com/keys))
@@ -123,7 +119,8 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - `seed_value`: Seed for 'fixed' mode (0-9007199254740991)
 - `max_retries`: Auto-retry attempts for recoverable errors (0-5)
 - `debug_mode`: Enable detailed error messages and request debugging
-- `image_input`: Optional image for vision models (Llama-4 only)
+- `image_input`: Optional image for vision-capable models (max 2048x2048)
+- `image_format`: PNG (lossless) or JPEG (smaller request for photographic content)
 - `additional_params`: Extra model parameters in JSON format
 
 #### Outputs:
@@ -132,18 +129,21 @@ Interact with Groq's API for ultra-fast inference with various LLM models. **Now
 - `help`: Comprehensive help text with usage information
 
 #### Vision Model Usage:
-1. Select a vision-capable model (auto-detected from Groq API):
-   - `meta-llama/llama-4-scout-17b-16e-instruct` (known vision model)
-   - Other models with 'vision', 'vl', or '-4-' in their ID are auto-detected
+
+1. Select a vision-capable model — `qwen/qwen3.6-27b` at time of writing, or any
+   other via `Manual Input`
 2. Connect an image to the `image_input` parameter
-3. Set `send_system` to "no" (vision models don't accept system prompts)
+3. Set `send_system` to "no" (vision models often reject system prompts)
 4. Describe what you want to know about the image in `user_prompt`
-1. Select a vision-capable model:
-   - `meta-llama/llama-4-maverick-17b-128e-instruct`
-   - `meta-llama/llama-4-scout-17b-16e-instruct`
-2. Connect an image to the `image_input` parameter
-3. Set `send_system` to "no" (vision models don't accept system prompts)
-4. Describe what you want to know about the image in `user_prompt`
+
+**An attached image is always sent.** The node does not refuse a request based on
+its own idea of which models accept images — that check would go stale every time
+Groq reshuffles its line-up and would block models that actually work. Groq is the
+authority; if it refuses the image, the error comes back with a hint naming the
+models that did look capable.
+
+Images are capped at 2048 pixels per dimension, and only the first image of a
+batch is sent.
 
 #### Production vs Preview Models:
 - **Production Models**: Stable, reliable, meet high standards for speed/quality. Recommended for production use.
@@ -156,86 +156,35 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 #### Features:
 - **ComfyUI v3 compatible** - Enhanced reliability and validation
 - Access to multiple AI providers through a single API
-- Comprehensive free model selection
-- Vision model support (Llama 3.2, Llama 4 variants)
+- Free-model dropdown built live from OpenRouter's public catalogue
+- Vision support, with capability read from the catalogue rather than hardcoded
 - JSON output support
 - Automatic retry mechanism with exponential backoff
 - Enhanced input validation
 - Detailed tooltips for all parameters
 - Debug mode for troubleshooting
 
-#### Available Free Models:
-**Meta Llama Models:**
-- meta-llama/llama-3.3-70b-instruct:free - **Default**
-- meta-llama/llama-3.3-8b-instruct:free
-- meta-llama/llama-3.2-3b-instruct:free
-- meta-llama/llama-3.2-1b-instruct:free
-- meta-llama/llama-3.1-8b-instruct:free
-- meta-llama/llama-4-maverick:free (**Vision**)
-- meta-llama/llama-4-scout:free (**Vision**)
-- meta-llama/llama-3.2-90b-vision-instruct:free (**Vision**)
+#### Model List:
 
-**Google Models:**
-- google/gemini-2.0-flash-exp:free
-- google/gemma-3-27b-it:free
-- google/gemma-2-27b-it:free
-- google/gemma-2-9b-it:free
-- google/gemma-2-2b-it:free
-- google/gemini-flash-1.5-8b-exp:free
+The dropdown is built at load time from OpenRouter's public catalogue
+(`GET /api/v1/models`) and lists every model priced at **$0 for both prompt and
+completion**, plus a `Manual Input` entry. It is not a hand-maintained list, so it
+tracks OpenRouter's free tier as it changes; press ComfyUI's **Refresh** to rebuild
+it (cached for 5 minutes).
 
-**Mistral Models:**
-- mistralai/mistral-small-3.1:free
-- mistralai/ministral-8b:free
-- mistralai/ministral-3b:free
-- mistralai/mistral-saba-24b:free
-- mistralai/mistral-nemo:free
-- mistralai/mistral-7b-instruct:free
+To use a **paid** model, select `Manual Input` and enter its `provider/model-name`
+id in `manual_model`.
 
-**Qwen Models:**
-- qwen/qwen3-72b:free
-- qwen/qwen-2.5-72b-instruct:free
-- qwen/qwen-2.5-coder-32b-instruct:free
-- qwen/qwen-2.5-7b-instruct:free
-- qwen/qwen-2-7b-instruct:free
-- qwen/qwen2.5-vl-32b-instruct:free (**Vision**)
-- qwen/qwen2-vl-7b-instruct:free (**Vision**)
-- qwen/qvq-72b-preview:free (**Vision**)
-
-**Microsoft Models:**
-- microsoft/phi-4:free
-- microsoft/phi-3.5-mini-128k-instruct:free
-- microsoft/phi-3-medium-128k-instruct:free
-
-**DeepSeek Models:**
-- deepseek/deepseek-r1-zero:free
-- deepseek/deepseek-r1-distill-llama-70b:free
-- deepseek/deepseek-r1-distill-llama-8b:free
-- deepseek/deepseek-r1-distill-qwen-32b:free
-- deepseek/deepseek-r1-distill-qwen-14b:free
-- deepseek/deepseek-r1-distill-qwen-7b:free
-- deepseek/deepseek-r1-distill-qwen-1.5b:free
-- deepseek/deepseek-chat:free
-- deepseek/deepseek-reasoner:free
-- deepseek/deepseek-coder:free
-- sophosympatheia/deephermes-3-405b:free
-
-**Nvidia Models:**
-- nvidia/llama-3.1-nemotron-70b-instruct:free
-- nvidia/nemotron-nano-12b-v2-vl:free (**Vision**)
-
-**Other Models:**
-- openchat/openchat-8b:free
-- openchat/openchat-7b:free
-- anthropic/claude-sonnet-4.5:free
-- sophosympatheia/rogue-rose-103b-v0.6.0:free
-- sophosympatheia/midnight-rose-70b-v1.0.5:free
-- huggingfaceh4/zephyr-7b-beta:free
+Use the **OpenRouter Models** node below to browse what is currently on offer,
+including pricing and context lengths.
 
 #### Parameters:
 - `api_key`: ⚠️ Your OpenRouter API key (Get from [https://openrouter.ai/keys](https://openrouter.ai/keys))
 - `model`: Select from free models or choose "Manual Input" for custom models
 - `manual_model`: Enter custom model identifier (only used when "Manual Input" is selected)
-- `base_url`: OpenRouter API endpoint URL (default: https://openrouter.ai/api/v1/chat/completions)
+- `base_url`: OpenRouter API endpoint URL (default: https://openrouter.ai/api/v1/chat/completions).
+  Must be `https://` unless it points at localhost; a non-OpenRouter endpoint prints a visible
+  warning on every run, because your API key is sent wherever `base_url` points.
 - `system_prompt`: Optional system context setting
 - `user_prompt`: Main prompt/question for the model (required)
 - `send_system`: Toggle system prompt on/off
@@ -254,6 +203,7 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - `max_retries`: Auto-retry attempts for recoverable errors (0-5)
 - `debug_mode`: Enable detailed error messages and request debugging
 - `image_input`: Optional image for vision models (max 2048x2048)
+- `image_format`: PNG (lossless) or JPEG (smaller request for photographic content)
 - `additional_params`: Extra model parameters in JSON format
 
 #### Outputs:
@@ -262,13 +212,16 @@ Interact with OpenRouter's API to access various AI models for text and vision t
 - `help`: Comprehensive help text with usage information
 
 #### Vision Model Usage:
-1. Select a vision-capable model (marked with **Vision** above)
+1. Select a vision-capable model — from the free dropdown, or via `Manual Input`
+   for a paid one such as `openai/gpt-4o`
 2. Connect an image to the `image_input` parameter
 3. Describe what you want to know about the image in `user_prompt`
-4. Vision-capable models include:
-   - Meta Llama: llama-4-maverick, llama-4-scout, llama-3.2-90b-vision
-   - Qwen: qwen2.5-vl-32b, qwen2-vl-7b, qvq-72b-preview
-   - Nvidia: nemotron-nano-12b-v2-vl
+
+Image capability is read from OpenRouter's own catalogue (`architecture.input_modalities`),
+so it stays correct as models come and go. A model the catalogue lists as text-only is
+rejected before the request is sent; an id the catalogue does not know is passed through
+so OpenRouter can answer for itself. Images are capped at 2048 pixels per dimension, and
+only the first image of a batch is sent.
 
 ### OpenRouter Models Node
 Query and filter available models from OpenRouter's API.
@@ -281,8 +234,11 @@ Query and filter available models from OpenRouter's API.
 - Easy-to-read formatted output
 
 #### Parameters:
-- `api_key`: ⚠️ Your OpenRouter API key (Note: key will be visible in workflows)
-- `filter_text`: Text to filter models
+- `api_key`: Optional — OpenRouter's model catalogue is public, so this can be left
+  empty (Note: if you do supply a key it will be visible in saved workflows)
+- `filter_text`: Text to filter models. `free` is matched against actual pricing
+  rather than the model name; all other terms are matched against id, name, and
+  description, and multiple terms are AND-ed together
 - `sort_by`: Sort models by name, pricing, or context length
 - `sort_order`: Choose ascending or descending sort order
 
@@ -351,7 +307,102 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 
 ## Version History
 
-### v2.0.0 (Current)
+### v2.2.0 (Current)
+- **Fixed: the pack failed to register in ComfyUI**
+  - The new shared module was imported absolutely (`import chat_common`). ComfyUI
+    executes a custom node's `__init__.py` under a synthetic module name and never
+    adds the folder to `sys.path`, so this raised `ModuleNotFoundError` and no node
+    in the pack loaded. Sibling imports are now relative
+  - The test suite now loads the repository the way ComfyUI does, and re-runs that
+    load in a clean interpreter, so this class of failure cannot pass again
+- **Security**
+  - OpenRouter: `base_url` must now be `https://` unless it points at localhost.
+    A shared workflow could previously point the endpoint at an attacker host and
+    receive the user's API key silently; a non-OpenRouter endpoint also prints a
+    visible warning on every run
+    The endpoint rule is enforced in `execute()` as well as at validation time,
+    because a `base_url` converted to an input socket has no value ComfyUI can
+    validate before the graph runs
+  - Debug mode no longer dumps multi-megabyte base64 image data into the status
+    output; data URIs are summarized instead
+  - The custom-endpoint warning no longer says the key "was sent" on paths that
+    sent nothing (an early validation failure), so the one message a user must be
+    able to trust stays accurate
+- **Packaging**
+  - Removed `torch`/`torchvision` from `requirements.txt` and `pyproject.toml` —
+    ComfyUI's environment owns torch (often a CUDA-specific build), and pip could
+    clobber it with a CPU-only wheel. The torchvision dependency is gone entirely;
+    tensor conversion now uses torch + PIL directly
+  - Fixed the test suite failing on Windows (`UnicodeDecodeError` on cp1252 locales)
+- **Robustness / UX**
+  - Retries honour the server's `Retry-After` header, use jittered exponential
+    backoff, and check ComfyUI's interrupt signal so a queued Cancel is respected
+    instead of blocking through up to minutes of sleeps
+  - New `image_format` input on both chat nodes: PNG (lossless, default) or JPEG
+    (much smaller payload for photographic content)
+  - Seed-counter eviction removes oldest entries first instead of clearing all
+    tracked counters; model-list caches are now thread-safe
+  - OpenRouter's default-model choice now walks a preference list like Groq's
+    instead of hardcoding one id with an alphabetical fallback
+  - Retry status messages report attempt counts correctly
+- **Housekeeping**
+  - Shared chat-node plumbing (image encoding, seeds, retry loop, redaction)
+    moved into `chat_common.py`, removing ~300 duplicated lines
+  - Removed dead per-module Extension classes and `comfy_entrypoint()`s; the
+    combined extension in `__init__.py` is the only v3 entry path
+  - Publish workflow permissions reduced to `contents: read`; both actions pinned
+    to immutable commit SHAs (`@v1` is a mutable branch), checkout no longer
+    persists credentials for the third-party publish step
+
+### v2.1.0
+- **Model list refreshed against Groq's current catalogue**
+  - `llama-3.3-70b-versatile` (the node's **default**) and `llama-3.1-8b-instant`
+    have been retired by Groq. The default is now `openai/gpt-oss-120b`; before
+    this change the node failed out of the box.
+  - `meta-llama/llama-4-scout-17b-16e-instruct` and `qwen/qwen3-32b` are gone
+  - Added `minimaxai/minimax-m2.7` and `qwen/qwen3.6-27b` (the current vision model)
+  - The `llama-prompt-guard-2-*` classifiers left the curated dropdown (512-token
+    safety classifiers, not chat models); still reachable via `Manual Input`
+- **Built to absorb model churn** (see *Keeping up with model churn* above)
+  - An attached image is always sent; the node no longer refuses one on the
+    strength of its own capability list, which also fixes a path where a stale
+    list would have silently dropped the image instead of sending it
+  - Modality metadata outranks name heuristics everywhere, in both directions
+  - The default model is resolved against the list that actually loaded, so a
+    retired default can no longer break the node on a fresh drop-in
+  - OpenRouter: embedding, reranking and speech models are filtered out of the
+    free dropdown — they are priced at $0 and so passed a pricing-only test
+    straight into a chat model list
+- **Correctness**
+  - Groq: send `max_completion_tokens` instead of the deprecated `max_tokens`
+  - Groq: dropped Whisper/Orpheus from the chat dropdown — they are served by the
+    audio endpoints and could never answer a chat-completions request
+  - Groq: selecting a `--- Category ---` row is now rejected with a clear message
+    instead of being sent to the API as a model id
+  - Groq: the model list is now actually fetched from the API — the fetch helper
+    was previously only ever called without a key, so the dropdown never updated
+  - OpenRouter: image capability is read from the full catalogue, so paid vision
+    models entered via `Manual Input` are no longer blocked
+  - Both chat nodes: added `fingerprint_inputs()`, without which the `random`,
+    `increment`, and `decrement` seed modes were inert on re-queue
+  - Both chat nodes: an image batch larger than 1 no longer errors out
+  - OpenRouter Models: null `context_length` and non-numeric pricing no longer
+    crash sorting and filtering
+  - OpenRouter Models: the API key is optional, matching the public endpoint
+- **Robustness**
+  - Failed model-list fetches back off for 60s instead of retrying on every run
+  - `additional_params` must be a JSON object, reported clearly rather than as an
+    "Unexpected Error" from inside `dict.update()`
+  - A malformed 200 response is reported as such instead of being retried as a
+    network error
+  - Seed counters are bounded
+- **Housekeeping**
+  - Removed the `ImportError` fallback that re-imported the same failing modules,
+    and the `WEB_DIRECTORY` pointing at a directory that does not exist
+  - De-duplicated the Groq help text and the README
+  - Added a pytest suite covering all three nodes
+
+### v2.0.0
 - **MAJOR UPDATE**: All nodes converted to ComfyUI v3 spec
 - **Groq Node v3**:
   - Updated models list to latest production and preview models
@@ -404,16 +455,54 @@ All nodes have been fully migrated to ComfyUI v3 spec:
 - Uses `comfy_api.latest` for enhanced reliability
 - Implements `define_schema()` with comprehensive input/output definitions
 - Stateless design with class methods (`execute()`, `validate_inputs()`)
-- Proper `comfy_entrypoint()` function for v3 registration
-- Combined extension class that registers all nodes
-- Maintains full v1 compatibility through legacy NODE_CLASS_MAPPINGS
-- Graceful fallback when v3 API is unavailable
+- Provides both `NODE_CLASS_MAPPINGS` and a `comfy_entrypoint()` extension, so the
+  pack registers on whichever path a given ComfyUI build checks
+- `fingerprint_inputs()` (v3's `IS_CHANGED`) so the non-fixed seed modes actually
+  re-run instead of serving a cached response
+
+These nodes require `comfy_api.latest`, which ships with current ComfyUI builds.
 
 ### API Compatibility
 - **Groq**: OpenAI-compatible API endpoint
 - **OpenRouter**: Multi-provider aggregation API
 - Both support standard OpenAI message format
 - Vision models use base64-encoded images in message content
+
+## Keeping up with model churn
+
+Groq and OpenRouter change their line-ups constantly, so the nodes are built to
+absorb that without edits here. The rule throughout: **provider metadata decides,
+hardcoded names are only a fallback, and nothing is refused on a guess.**
+
+| Concern | How it self-heals |
+| --- | --- |
+| New model released | Appears in the dropdown on the next Refresh. Anything the pack does not recognise is listed under `--- Other ---` rather than hidden. |
+| Default model retired | The default is resolved against the list that actually loaded, walking a preference order and then falling back to the first real entry. A retired default can no longer break the node on a fresh drop-in. |
+| New vision model | Groq: works immediately — an attached image is always sent and Groq decides, so the node never refuses one from its own capability list. OpenRouter: refused only when its public catalogue positively lists the model as text-only; an unknown id is passed straight through. |
+| A model's name trips a heuristic | Affirmative modality metadata always wins. A chat model called `…-tts-…` or `…-embed-…` stays listed if the API says it emits text. |
+| Provider adds modality fields | Read automatically. Several plausible field names are checked, and an entry that reports nothing is treated as "unknown", never as "unsupported". |
+| Provider is unreachable | Groq falls back to a static list and backs off for 60s. OpenRouter offers `Manual Input`, which reaches any model id. |
+
+The one genuinely time-sensitive thing in the repo is Groq's `STATIC_FALLBACK_MODELS`,
+used only when no API key has been supplied yet. A stale entry there costs a clear
+error from Groq, not a broken node.
+
+`tests/test_package.py` simulates a wholesale catalogue reshuffle — invented vendors,
+unfamiliar ids, retired defaults — to check these paths keep working.
+
+## Development
+
+Run the test suite (no API keys and no network access required — every HTTP call is
+stubbed):
+
+```bash
+pip install pytest pillow requests torch numpy   # torch normally comes from ComfyUI
+python -m pytest tests
+```
+
+The suite loads the repository the way ComfyUI does — from `__init__.py`, with the
+pack folder absent from `sys.path` — so a sibling module imported absolutely fails
+here rather than at node registration.
 
 ## Contributing
 
