@@ -8,8 +8,7 @@ on:
       - "pyproject.toml"
 
 permissions:
-  issues: write
-
+  contents: read
 jobs:
   publish-node:
     name: Publish Custom Node to registry
