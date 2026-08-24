@@ -5,6 +5,8 @@ A collection of ComfyUI v3 nodes for interacting with cloud LLM services.
 Repository: https://github.com/EnragedAntelope/ComfyUI-EACloudNodes
 """
 
+from comfy_api.latest import ComfyExtension, io
+
 from .groq_node import (
     GroqNode,
     NODE_CLASS_MAPPINGS as GROQ_MAPPINGS,
@@ -36,20 +38,18 @@ NODE_DISPLAY_NAME_MAPPINGS.update(OPENROUTER_DISPLAY_MAPPINGS)
 NODE_DISPLAY_NAME_MAPPINGS.update(OPENROUTER_MODELS_DISPLAY_MAPPINGS)
 
 
+class EACloudNodesExtension(ComfyExtension):
+    """Combined extension for all EACloudNodes"""
 
-async def comfy_entrypoint():
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        return [GroqNode, OpenrouterNode, OpenRouterModels]
+
+
+async def comfy_entrypoint() -> ComfyExtension:
     """
     ComfyUI v3 entry point, kept for ComfyUI builds that prefer it over
     NODE_CLASS_MAPPINGS. Returns one extension covering every node in the pack.
     """
-    from comfy_api.latest import ComfyExtension, io
-
-    class EACloudNodesExtension(ComfyExtension):
-        """Combined extension for all EACloudNodes"""
-
-        async def get_node_list(self) -> list[type[io.ComfyNode]]:
-            return [GroqNode, OpenrouterNode, OpenRouterModels]
-
     return EACloudNodesExtension()
 
 

@@ -6,7 +6,7 @@ Query and filter available models from OpenRouter's API.
 import json
 import requests
 
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import io
 
 
 def _as_float(value, default=0.0) -> float:
@@ -262,16 +262,6 @@ class OpenRouterModels(io.ComfyNode):
             )
 
 
-class OpenRouterModelsExtension(ComfyExtension):
-    """Extension class for OpenRouter Models node"""
-
-    async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [OpenRouterModels]
-
-
-async def comfy_entrypoint() -> ComfyExtension:
-    """Entry point for ComfyUI v3"""
-    return OpenRouterModelsExtension()
 
 
 # Legacy v1 compatibility
