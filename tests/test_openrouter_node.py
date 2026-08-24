@@ -268,3 +268,61 @@ def test_success_reports_model_and_tokens(openrouter_call):
 def test_help_output_is_not_duplicated(openrouter_call):
     help_text = openrouter_call().args[2]
     assert help_text.count("Key Settings:") == 1
+
+
+# --------------------------------------------------------------------------
+# v2.2.0: endpoint policy, image format, redaction, Retry-After
+# --------------------------------------------------------------------------
+
+
+def test_plain_http_to_a_remote_host_is_rejected():
+    """The Authorization header must never cross the wire in cleartext."""
+    result = OpenrouterNode.validate_inputs(
+        api_key="k", model="Manual Input", manual_model="a/b", user_prompt="hi",
+        base_url="http://evil.example.com/v1")
+    assert isinstance(result, str) and "plain http://" in result
+
+
+def test_plain_http_to_localhost_is_allowed():
+    """A local proxy is the one legitimate plain-http case."""
+    assert OpenrouterNode.validate_inputs(
+        api_key="k", model="Manual Input", manual_model="a/b", user_prompt="hi",
+        base_url="http://127.0.0.1:8080/v1") is True
+
+
+def test_custom_endpoint_warns_in_the_status(catalogue, openrouter_call):
+    """A shared workflow pointing base_url elsewhere must be loud about it."""
+    out = openrouter_call(base_url="https://proxy.example.com/v1")
+    assert out.args[0] == "hello"
+    assert "Custom endpoint" in out.args[1]
+    assert "proxy.example.com" in out.args[1]
+
+
+def test_default_endpoint_does_not_warn(openrouter_call):
+    out = openrouter_call()
+    assert "Custom endpoint" not in out.args[1]
+
+
+def test_jpeg_format_produces_a_jpeg_data_url(catalogue, openrouter_call):
+    openrouter_call(manual_model="paid/vision-model",
+                    image_input=torch.rand(1, 16, 16, 3), image_format="jpeg")
+    url = openrouter_call.calls["calls"][0]["body"]["messages"][-1]["content"][1]["image_url"]["url"]
+    assert url.startswith("data:image/jpeg;base64,")
+
+
+def test_debug_body_redacts_image_data(catalogue, openrouter_call):
+    out = openrouter_call(responses=[FakeResponse(400, {"error": {"message": "no"}})],
+                          manual_model="paid/vision-model",
+                          image_input=torch.rand(1, 32, 32, 3), debug_mode="on")
+    assert "Request body" in out.args[1]
+    assert "redacted data URI" in out.args[1]
+    assert "iVBORw0KGgo" not in out.args[1]
+
+
+def test_retry_after_header_is_honoured(openrouter_call, no_sleep):
+    """A server-provided Retry-After beats our backoff curve."""
+    responses = [FakeResponse(429, {}, headers={"Retry-After": "7"}),
+                 FakeResponse(200, chat_payload())]
+    out = openrouter_call(responses=responses, max_retries=2)
+    assert out.args[0] == "hello"
+    assert no_sleep == [7]

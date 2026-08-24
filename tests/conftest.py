@@ -18,10 +18,11 @@ import openrouter_models  # noqa: E402
 class FakeResponse:
     """Stand-in for requests.Response."""
 
-    def __init__(self, status_code=200, payload=None, raise_json=False):
+    def __init__(self, status_code=200, payload=None, raise_json=False, headers=None):
         self.status_code = status_code
         self._payload = payload if payload is not None else {}
         self._raise_json = raise_json
+        self.headers = headers or {}
 
     def json(self):
         if self._raise_json:

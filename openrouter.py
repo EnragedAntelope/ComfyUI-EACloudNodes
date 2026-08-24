@@ -3,17 +3,15 @@ OpenRouter Chat Node for ComfyUI v3
 Supports text and vision-language models through OpenRouter's API.
 """
 
-import base64
 import json
 import requests
 import time
 from PIL import Image
-import io as python_io
 import torch
-from torchvision.transforms import ToPILImage
-import random
+from urllib.parse import urlsplit
 
-from comfy_api.latest import ComfyExtension, io
+import chat_common
+from comfy_api.latest import io
 
 
 # Module-level cache for dynamically fetched models
@@ -26,6 +24,19 @@ _openrouter_model_cache = {
     "last_failure": 0,
     "failure_backoff": 60  # don't re-try a failing fetch on every execution
 }
+
+DEFAULT_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Hosts a plain-http request is allowed to target: local proxies only. The
+# Authorization header would otherwise cross the network in cleartext.
+LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+# Preferred defaults, most wanted first; mirrors the Groq node's strategy.
+# The first entry present in the fetched free list wins, falling back to the
+# first real model, so a retired default cannot break the node out of the box.
+PREFERRED_DEFAULT_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+]
 
 
 # Embedding, reranking and speech models are priced at $0 and so pass a
@@ -93,75 +104,87 @@ def _fetch_openrouter_free_models():
     """
     now = time.time()
 
-    # Return cached results if still fresh
-    if (_openrouter_model_cache["models"] is not None and
-            now - _openrouter_model_cache["last_fetch"] < _openrouter_model_cache["cache_ttl"]):
-        return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
-
-    # Back off after a failure too, so an offline host does not add a request
-    # (and its timeout) to every node execution and every /object_info refresh.
-    if now - _openrouter_model_cache["last_failure"] < _openrouter_model_cache["failure_backoff"]:
-        return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
-
-    try:
-        response = requests.get(
-            "https://openrouter.ai/api/v1/models",
-            timeout=5
-        )
-        if response.status_code != 200:
-            raise Exception(f"API returned status {response.status_code}")
-
-        data = response.json().get("data", [])
-
-        free_models = []
-        vision_models = []
-        known_models = []
-
-        for model in data:
-            model_id = model.get("id", "")
-            if not model_id:
-                continue
-
-            # Embeddings, rerankers and TTS models are $0 and would otherwise pass
-            # the pricing-only "free" test straight into a chat dropdown.
-            if not _model_supports_chat(model):
-                continue
-
-            known_models.append(model_id)
-
-            # Vision capability is tracked for every model, not just the free ones,
-            # so models entered via 'Manual Input' can be checked too.
-            if _model_accepts_images(model):
-                vision_models.append(model_id)
-
-            pricing = model.get("pricing") or {}
-            try:
-                is_free = (
-                    float(pricing.get("prompt", "1")) == 0 and
-                    float(pricing.get("completion", "1")) == 0
-                )
-            except (ValueError, TypeError):
-                continue
-
-            if is_free:
-                free_models.append(model_id)
-
-        free_models.sort()
-        free_models.append("Manual Input")
-
-        _openrouter_model_cache["models"] = free_models
-        _openrouter_model_cache["vision_models"] = vision_models
-        _openrouter_model_cache["known_models"] = known_models
-        _openrouter_model_cache["last_fetch"] = now
-
-        return free_models, vision_models
-
-    except Exception:
-        _openrouter_model_cache["last_failure"] = now
-        # Return previously cached results if available, otherwise None
-        if _openrouter_model_cache["models"] is not None:
+    with chat_common.LOCK:
+        # Return cached results if still fresh
+        if (_openrouter_model_cache["models"] is not None and
+                now - _openrouter_model_cache["last_fetch"] < _openrouter_model_cache["cache_ttl"]):
             return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
-        return None, None
+
+        # Back off after a failure too, so an offline host does not add a request
+        # (and its timeout) to every node execution and every /object_info refresh.
+        if now - _openrouter_model_cache["last_failure"] < _openrouter_model_cache["failure_backoff"]:
+            return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
+
+        try:
+            response = requests.get(
+                "https://openrouter.ai/api/v1/models",
+                timeout=5
+            )
+            if response.status_code != 200:
+                raise Exception(f"API returned status {response.status_code}")
+
+            data = response.json().get("data", [])
+
+            free_models = []
+            vision_models = []
+            known_models = []
+
+            for model in data:
+                model_id = model.get("id", "")
+                if not model_id:
+                    continue
+
+                # Embeddings, rerankers and TTS models are $0 and would otherwise pass
+                # the pricing-only "free" test straight into a chat dropdown.
+                if not _model_supports_chat(model):
+                    continue
+
+                known_models.append(model_id)
+
+                # Vision capability is tracked for every model, not just the free ones,
+                # so models entered via 'Manual Input' can be checked too.
+                if _model_accepts_images(model):
+                    vision_models.append(model_id)
+
+                pricing = model.get("pricing") or {}
+                try:
+                    is_free = (
+                        float(pricing.get("prompt", "1")) == 0 and
+                        float(pricing.get("completion", "1")) == 0
+                    )
+                except (ValueError, TypeError):
+                    continue
+
+                if is_free:
+                    free_models.append(model_id)
+
+            free_models.sort()
+            free_models.append("Manual Input")
+
+            _openrouter_model_cache["models"] = free_models
+            _openrouter_model_cache["vision_models"] = vision_models
+            _openrouter_model_cache["known_models"] = known_models
+            _openrouter_model_cache["last_fetch"] = now
+
+            return free_models, vision_models
+
+        except Exception:
+            _openrouter_model_cache["last_failure"] = now
+            # Return previously cached results if available, otherwise None
+            if _openrouter_model_cache["models"] is not None:
+                return _openrouter_model_cache["models"], _openrouter_model_cache["vision_models"]
+            return None, None
+
+
+def _pick_default_model(models: list[str]) -> str:
+    """Choose a default that exists in the given list, mirroring the Groq node."""
+    for preferred in PREFERRED_DEFAULT_MODELS:
+        if preferred in models:
+            return preferred
+    for model_id in models:
+        if model_id != "Manual Input":
+            return model_id
+    return "Manual Input"
 
 
 class OpenrouterNode(io.ComfyNode):
@@ -188,9 +211,7 @@ class OpenrouterNode(io.ComfyNode):
             models = ["Manual Input"]
 
         # Pick a sensible default from the fetched list
-        default_model = "meta-llama/llama-3.3-70b-instruct:free"
-        if default_model not in models:
-            default_model = models[0] if models and models[0] != "Manual Input" else "Manual Input"
+        default_model = _pick_default_model(models)
 
         return io.Schema(
             node_id="OpenrouterNode",
@@ -218,9 +239,9 @@ class OpenrouterNode(io.ComfyNode):
                 ),
                 io.String.Input(
                     "base_url",
-                    default="https://openrouter.ai/api/v1/chat/completions",
+                    default=DEFAULT_BASE_URL,
                     multiline=False,
-                    tooltip="OpenRouter API endpoint URL. Leave as default unless using a proxy or alternate endpoint."
+                    tooltip="OpenRouter API endpoint URL. Leave as default unless using a proxy or alternate endpoint. Must be https:// unless it points at localhost; non-OpenRouter endpoints get a visible warning on every run, because your key is sent there."
                 ),
                 io.String.Input(
                     "system_prompt",
@@ -335,6 +356,12 @@ class OpenrouterNode(io.ComfyNode):
                     optional=True,
                     tooltip="Optional image input. Capability is checked against OpenRouter's model catalogue; models it lists as text-only are rejected. Maximum size: 2048x2048 (only the first image of a batch is sent)."
                 ),
+                io.Combo.Input(
+                    "image_format",
+                    options=["png", "jpeg"],
+                    default="png",
+                    tooltip="Encoding for the attached image. PNG is lossless (best for screenshots and text); JPEG produces a much smaller request for photographic content, cutting latency and token overhead."
+                ),
                 io.String.Input(
                     "additional_params",
                     default="",
@@ -368,13 +395,28 @@ class OpenrouterNode(io.ComfyNode):
         if model == "Manual Input" and (not manual_model or not manual_model.strip()):
             return "Manual model identifier is required when 'Manual Input' is selected"
 
-
         # Validate base URL
         if not base_url or not base_url.strip():
             return "OpenRouter API endpoint URL is required"
 
-        if not base_url.startswith(("http://", "https://")):
+        stripped_url = base_url.strip()
+        try:
+            parts = urlsplit(stripped_url)
+        except ValueError:
+            return "Invalid API endpoint URL format"
+
+        scheme = parts.scheme.lower()
+        host = (parts.hostname or "").lower()
+
+        if scheme not in ("http", "https"):
             return "Invalid API endpoint URL format (must start with http:// or https://)"
+
+        # Workflows are shared as JSON files, and this header carries the user's
+        # key. Plain http would put it on the wire in cleartext; only a local
+        # proxy has a reason to do that.
+        if scheme == "http" and host not in LOCAL_HTTP_HOSTS:
+            return ("Refusing to send your API key over plain http://. Use an "
+                    "https:// endpoint, or point base_url at a localhost proxy.")
 
         # Validate additional_params if provided
         additional_params = kwargs.get("additional_params", "")
@@ -423,6 +465,7 @@ class OpenrouterNode(io.ComfyNode):
         seed_value: int,
         max_retries: int,
         debug_mode: str,
+        image_format: str = "png",
         image_input=None,
         additional_params: str = ""
     ) -> io.NodeOutput:
@@ -438,7 +481,9 @@ Key Settings:
 - Model: Dropdown auto-populates with free models from OpenRouter's API.
   Use ComfyUI's Refresh to update the list. Choose 'Manual Input' for custom models.
 - Manual Model: Custom model ID (provider/model-name[:free])
-- Base URL: API endpoint (usually leave as default)
+- Base URL: API endpoint (usually leave as default). https:// required unless
+  the endpoint is localhost; a non-OpenRouter endpoint warns on every run,
+  because your API key is sent wherever base_url points.
 - System Prompt: Set AI behavior/context
 - User Prompt: Main input for the model (required)
 - Send System: Toggle system prompt on/off
@@ -453,13 +498,15 @@ Key Settings:
 - Seed Mode: Fixed/random/increment/decrement for reproducibility
 - Seed Value: Seed for 'fixed' mode (0-9007199254740991)
 - Max Retries: Auto-retry on errors (0-5)
-- Debug Mode: Enable for detailed error messages
+- Debug Mode: Enable for detailed error messages (image data is summarized
+  rather than dumped)
 
 Optional:
 - Image Input: For vision-capable models
   * Capability is read from OpenRouter's model catalogue; a model the catalogue
     lists as text-only is rejected, and ids it does not know are passed through
   * Max size: 2048x2048 per dimension; only the first image of a batch is sent
+- Image Format: PNG (lossless) or JPEG (smaller payload for photos)
 - Additional Params: Extra model parameters as a JSON object, merged into the
   request body (it overrides the widgets above on key collisions)
 
@@ -475,6 +522,20 @@ Note on the model dropdown:
 For full documentation and examples, visit:
 https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
 
+        # Workflows travel as JSON files, and whatever sits in base_url receives
+        # the Authorization header. Make a redirected request impossible to miss.
+        try:
+            endpoint_host = (urlsplit((base_url or "").strip()).hostname or "").lower()
+        except ValueError:
+            endpoint_host = ""
+        endpoint_warning = (
+            f"\n⚠️ Custom endpoint: your API key and prompt were sent to '{endpoint_host}', "
+            "not openrouter.ai." if endpoint_host and endpoint_host != "openrouter.ai" else ""
+        )
+
+        def out(response_text: str, status: str) -> io.NodeOutput:
+            return io.NodeOutput(response_text, status + endpoint_warning, help_text)
+
         try:
             # Sanitize and validate numeric inputs
             try:
@@ -488,12 +549,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 max_retries = max(0, min(5, int(max_retries)))
                 seed_value = max(0, min(cls.MAX_SAFE_INTEGER, int(seed_value)))
             except (ValueError, TypeError) as e:
-                return io.NodeOutput("", f"Error: Invalid parameter value - {str(e)}", help_text)
+                return out("", f"Error: Invalid parameter value - {str(e)}")
 
             # Validate user prompt (delayed until execute to handle connected inputs)
             if not user_prompt or not user_prompt.strip():
-                return io.NodeOutput("", "User prompt is required", help_text)
-
+                return out("", "User prompt is required")
 
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model.strip() if model == "Manual Input" else model
@@ -502,21 +562,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             # Counters are keyed by (model, starting seed) and capped so long-running
             # sessions cannot grow this dict without bound.
             node_key = (actual_model, seed_value)
-            if seed_mode == "random":
-                seed = random.randint(0, cls.MAX_SAFE_INTEGER)
-            elif seed_mode == "increment":
-                last_seed = cls._last_seed.get(node_key, seed_value)
-                seed = (last_seed + 1) % cls.MAX_SAFE_INTEGER
-            elif seed_mode == "decrement":
-                last_seed = cls._last_seed.get(node_key, seed_value)
-                seed = (last_seed - 1) if last_seed > 0 else cls.MAX_SAFE_INTEGER
-            else:  # "fixed"
-                seed = seed_value
-
-            # Store the seed we're using
-            if len(cls._last_seed) >= cls.MAX_TRACKED_SEEDS:
-                cls._last_seed.clear()
-            cls._last_seed[node_key] = seed
+            with chat_common.LOCK:
+                seed = chat_common.derive_seed(
+                    cls._last_seed, node_key, seed_mode, seed_value, cls.MAX_SAFE_INTEGER)
+                chat_common.store_seed(
+                    cls._last_seed, node_key, seed, cls.MAX_TRACKED_SEEDS)
 
             # Vision gating. Only refuse when OpenRouter's own catalogue tells us the
             # selected model does not accept images; unknown ids (custom endpoints,
@@ -527,12 +577,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 vision_models = _openrouter_model_cache.get("vision_models") or []
                 known_models = _openrouter_model_cache.get("known_models") or []
                 if actual_model in known_models and actual_model not in vision_models:
-                    return io.NodeOutput(
+                    return out(
                         "",
                         f"Error: Model '{actual_model}' does not accept image input according to "
                         "OpenRouter's model catalogue. Choose a vision-capable model, or disconnect "
-                        "the image input.",
-                        help_text
+                        "the image input."
                     )
 
             # Prepare headers
@@ -554,57 +603,17 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             # Handle image input if provided
             if image_input is not None:
                 try:
-                    # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
-                        # ComfyUI IMAGE tensors are [batch, height, width, channels];
-                        # take the first frame rather than failing on batches > 1.
-                        if image_input.dim() == 4:
-                            image_input = image_input[0]
-                        if image_input.dim() != 3:
-                            return io.NodeOutput(
-                                "",
-                                f"Error: Expected a 3D or 4D image tensor, got {image_input.dim()}D",
-                                help_text
-                            )
-
-                        if image_input.shape[-1] in [1, 3, 4]:
-                            image_input = image_input.permute(2, 0, 1)
-
-                        image_input = image_input.cpu()
-                        # ComfyUI IMAGE tensors are floats in 0..1; clamping keeps an
-                        # out-of-range upstream result from wrapping around on convert.
-                        # Integer tensors are already in 0..255 and must not be clamped.
-                        if image_input.is_floating_point():
-                            image_input = image_input.clamp(0, 1)
-                        pil_image = ToPILImage()(image_input)
+                        pil_image = chat_common.tensor_to_pil(image_input)
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
                     else:
-                        return io.NodeOutput("", "Error: Unsupported image input type", help_text)
+                        return out("", "Error: Unsupported image input type")
 
-                    # Validate image dimensions (max 2048 in either dimension)
-                    if pil_image.size[0] > 2048 or pil_image.size[1] > 2048:
-                        return io.NodeOutput(
-                            "",
-                            f"Error: Image too large ({pil_image.size[0]}x{pil_image.size[1]}). Maximum is 2048 pixels in either dimension. Please resize your image.",
-                            help_text
-                        )
-
-                    # Convert image to base64
-                    buffered = python_io.BytesIO()
-                    pil_image.save(buffered, format="PNG")
-                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-                    # Add user message with image for vision models
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
-                        ]
-                    })
+                    messages.append(chat_common.encode_image_message(
+                        pil_image, user_prompt, image_format))
                 except Exception as img_err:
-                    return io.NodeOutput("", f"Image Processing Error: {str(img_err)}", help_text)
+                    return out("", f"Image Processing Error: {str(img_err)}")
             else:
                 # Add text-only user message
                 messages.append({
@@ -618,7 +627,8 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
-                "max_tokens": max_tokens
+                "max_tokens": max_tokens,
+                "seed": seed
             }
 
             # Add optional parameters
@@ -634,9 +644,6 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             if repetition_penalty != 1.0:
                 body["repetition_penalty"] = repetition_penalty
 
-            if seed is not None:
-                body["seed"] = seed
-
             # Add response format if json_object is selected
             if response_format == "json_object":
                 body["response_format"] = {"type": "json_object"}
@@ -646,106 +653,77 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 try:
                     extra_params = json.loads(additional_params)
                 except json.JSONDecodeError:
-                    return io.NodeOutput("", "Error: Invalid JSON in additional parameters. Example format: {\"top_a\": 0.5}", help_text)
+                    return out("", "Error: Invalid JSON in additional parameters. Example format: {\"top_a\": 0.5}")
                 if not isinstance(extra_params, dict):
-                    return io.NodeOutput("", "Error: Additional parameters must be a JSON object. Example format: {\"top_a\": 0.5}", help_text)
+                    return out("", "Error: Additional parameters must be a JSON object. Example format: {\"top_a\": 0.5}")
                 body.update(extra_params)
 
-            # Make API request with retry logic
-            retries = 0
-            while True:
+            response, transport_error = chat_common.post_with_retries(
+                base_url, headers=headers, body=body, max_retries=max_retries)
+
+            if transport_error is not None:
+                return out("", transport_error)
+
+            # Handle 400 errors with detailed information
+            if response.status_code == 400:
                 try:
-                    response = requests.post(base_url, headers=headers, json=body, timeout=120)
+                    error_json = response.json()
+                    error_message = error_json.get("error", {}).get("message", "Unknown error")
 
-                    # Define retryable status codes
-                    retryable_codes = {429, 500, 502, 503, 504}
-
-                    if response.status_code in retryable_codes and retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)  # Exponential backoff: 2, 4, 8, 16... seconds
-                        continue
-
-                    # Handle 400 errors with detailed information
-                    if response.status_code == 400:
-                        try:
-                            error_json = response.json()
-                            error_message = error_json.get("error", {}).get("message", "Unknown error")
-
-                            if debug_mode == "on":
-                                return io.NodeOutput(
-                                    "",
-                                    f"Error 400: {error_message}\n\nRequest body:\n{json.dumps(body, indent=2)}",
-                                    help_text
-                                )
-                            else:
-                                return io.NodeOutput("", f"Error 400: {error_message}", help_text)
-                        except Exception:
-                            return io.NodeOutput(
-                                "",
-                                "Error: Bad request - check model name and parameters (enable debug mode for details)",
-                                help_text
-                            )
-
-                    # Handle other response codes
-                    if response.status_code == 401:
-                        return io.NodeOutput("", "Error: Invalid API key or unauthorized access", help_text)
-                    elif response.status_code == 413:
-                        return io.NodeOutput("", "Error: Payload too large - try reducing prompt or image size", help_text)
-                    elif response.status_code == 429:
-                        return io.NodeOutput("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
-                    elif response.status_code in {500, 502, 503, 504}:
-                        return io.NodeOutput("", f"Error: OpenRouter service error (status {response.status_code}). Tried {retries} times", help_text)
-                    elif response.status_code != 200:
-                        return io.NodeOutput("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
-
-                    response_json = response.json()
-
-                    # Extract information for status
-                    model_used = response_json.get("model", "unknown")
-                    tokens = response_json.get("usage", {})
-                    prompt_tokens = tokens.get("prompt_tokens", 0)
-                    completion_tokens = tokens.get("completion_tokens", 0)
-                    total_tokens = prompt_tokens + completion_tokens
-
-                    status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
-
-                    if "choices" in response_json and len(response_json["choices"]) > 0:
-                        content = response_json["choices"][0].get("message", {}).get("content", "")
-                        return io.NodeOutput(content, status_msg, help_text)
+                    if debug_mode == "on":
+                        return out(
+                            "",
+                            f"Error 400: {error_message}"
+                            f"\n\nRequest body:\n{json.dumps(chat_common.redact_body(body), indent=2)}"
+                        )
                     else:
-                        return io.NodeOutput("", "Error: No response content from the model", help_text)
+                        return out("", f"Error 400: {error_message}")
+                except Exception:
+                    return out(
+                        "",
+                        "Error: Bad request - check model name and parameters (enable debug mode for details)"
+                    )
 
-                except requests.exceptions.Timeout:
-                    if retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)
-                        continue
-                    return io.NodeOutput("", f"Error: Request timed out after {retries} tries. Please try again", help_text)
-                except requests.exceptions.JSONDecodeError:
-                    # A 200 with a malformed body is not worth retrying
-                    return io.NodeOutput("", "Error: Invalid JSON response from OpenRouter", help_text)
-                except requests.exceptions.RequestException as req_err:
-                    # Retry network-related errors
-                    if retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)
-                        continue
-                    return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
+            # Handle other response codes
+            if response.status_code == 401:
+                return out("", "Error: Invalid API key or unauthorized access")
+            elif response.status_code == 413:
+                return out("", "Error: Payload too large - try reducing prompt or image size")
+            elif response.status_code == 429:
+                return out(
+                    "", f"Error: Rate limit exceeded even after {max_retries + 1} attempt(s)")
+            elif response.status_code in {500, 502, 503, 504}:
+                return out(
+                    "", f"Error: OpenRouter service error (status {response.status_code})")
+            elif response.status_code != 200:
+                return out("", f"Error: API returned status {response.status_code}")
+
+            try:
+                response_json = response.json()
+            except requests.exceptions.JSONDecodeError:
+                # A 200 with a malformed body is not worth retrying
+                return out("", "Error: Invalid JSON response from OpenRouter")
+
+            # Extract information for status
+            model_used = response_json.get("model", "unknown")
+            tokens = response_json.get("usage", {})
+            prompt_tokens = tokens.get("prompt_tokens", 0)
+            completion_tokens = tokens.get("completion_tokens", 0)
+            total_tokens = prompt_tokens + completion_tokens
+
+            status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
+
+            if "choices" in response_json and len(response_json["choices"]) > 0:
+                content = response_json["choices"][0].get("message", {}).get("content", "")
+                return out(content, status_msg)
+            else:
+                return out("", "Error: No response content from the model")
 
         except Exception as e:
-            return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)
-
-
-class OpenRouterExtension(ComfyExtension):
-    """Extension class for OpenRouter nodes"""
-
-    async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [OpenrouterNode]
-
-
-async def comfy_entrypoint() -> ComfyExtension:
-    """Entry point for ComfyUI v3"""
-    return OpenRouterExtension()
+            # ComfyUI's cancel signal must propagate, not become a chat error.
+            if type(e).__name__ == "InterruptProcessingException":
+                raise
+            return out("", f"Unexpected Error: {str(e)}")
 
 
 # Legacy v1 compatibility (for nodes that still use old API)
