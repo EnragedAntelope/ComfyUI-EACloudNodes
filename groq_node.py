@@ -5,15 +5,12 @@ Supports text and vision-language models through Groq's API.
 
 import json
 import requests
-import base64
 import time
 from PIL import Image
-import io as python_io
 import torch
-from torchvision.transforms import ToPILImage
-import random
 
-from comfy_api.latest import ComfyExtension, io
+import chat_common
+from comfy_api.latest import io
 
 # ============================================================================
 # MODULE-LEVEL CONSTANTS (Dynamic Model Fetching)
@@ -135,11 +132,11 @@ def _categorize_groq_models(api_models: list[dict]) -> list[str]:
     for category, model_list in MODEL_CATEGORIES.items():
         for model_id in model_list:
             model_to_category[model_id] = category
-    
+
     # Group fetched models by category
     categorized = {cat: [] for cat in MODEL_CATEGORIES.keys()}
     categorized["Other"] = []
-    
+
     for model in api_models:
         model_id = model.get("id", "")
         if not model_id or not model.get("active", True):
@@ -154,18 +151,18 @@ def _categorize_groq_models(api_models: list[dict]) -> list[str]:
             categorized[model_to_category[model_id]].append(model_id)
         else:
             categorized["Other"].append(model_id)
-    
+
     # Build final list with category headers
     result = []
     for category in MODEL_CATEGORIES.keys():
         if categorized[category]:
             result.append(f"--- {category} ---")
             result.extend(sorted(categorized[category]))
-    
+
     if categorized["Other"]:
         result.append("--- Other ---")
         result.extend(sorted(categorized["Other"]))
-    
+
     result.append("Manual Input")
     return result
 
@@ -236,65 +233,66 @@ def _pick_default_model(models: list[str]) -> str:
 def _fetch_groq_models(api_key: str = None) -> tuple[list[str], list[str]]:
     """
     Fetch available models from Groq API with 5-minute caching.
-    
+
     Args:
         api_key: Optional Groq API key. If not provided, returns static fallback.
-    
+
     Returns:
         tuple: (categorized_model_list, vision_model_list)
                Returns static fallback if API call fails or no key provided.
     """
     now = time.time()
 
-    # Return cached results if still fresh
-    if (_groq_model_cache["models"] is not None and
-            now - _groq_model_cache["last_fetch"] < _groq_model_cache["cache_ttl"]):
-        return _groq_model_cache["models"], _groq_model_cache["vision_models"]
-
-    # If no API key, return static fallback
-    if not api_key or not api_key.strip():
-        return _get_static_fallback_models()
-
-    # Back off after a failure too, so a broken key or an offline host does not
-    # add a request (and its timeout) to every single node execution.
-    if now - _groq_model_cache["last_failure"] < _groq_model_cache["failure_backoff"]:
-        if _groq_model_cache["models"] is not None:
+    with chat_common.LOCK:
+        # Return cached results if still fresh
+        if (_groq_model_cache["models"] is not None and
+                now - _groq_model_cache["last_fetch"] < _groq_model_cache["cache_ttl"]):
             return _groq_model_cache["models"], _groq_model_cache["vision_models"]
-        return _get_static_fallback_models()
 
-    try:
-        # Fetch from Groq API
-        response = requests.get(
-            "https://api.groq.com/openai/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=5
-        )
-        
-        if response.status_code != 200:
-            raise Exception(f"API returned status {response.status_code}")
-        
-        data = response.json().get("data", [])
-        
-        # Build categorized model list
-        categorized_models = _categorize_groq_models(data)
-        
-        # Detect vision-capable models
-        vision_models = _detect_vision_models(data)
-        
-        # Update cache
-        _groq_model_cache["models"] = categorized_models
-        _groq_model_cache["vision_models"] = vision_models
-        _groq_model_cache["last_fetch"] = now
-        
-        return categorized_models, vision_models
-        
-    except Exception:
-        _groq_model_cache["last_failure"] = now
-        # Return previously cached results if available
-        if _groq_model_cache["models"] is not None:
-            return _groq_model_cache["models"], _groq_model_cache["vision_models"]
-        # Return static fallback
-        return _get_static_fallback_models()
+        # If no API key, return static fallback
+        if not api_key or not api_key.strip():
+            return _get_static_fallback_models()
+
+        # Back off after a failure too, so a broken key or an offline host does not
+        # add a request (and its timeout) to every single node execution.
+        if now - _groq_model_cache["last_failure"] < _groq_model_cache["failure_backoff"]:
+            if _groq_model_cache["models"] is not None:
+                return _groq_model_cache["models"], _groq_model_cache["vision_models"]
+            return _get_static_fallback_models()
+
+        try:
+            # Fetch from Groq API
+            response = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=5
+            )
+
+            if response.status_code != 200:
+                raise Exception(f"API returned status {response.status_code}")
+
+            data = response.json().get("data", [])
+
+            # Build categorized model list
+            categorized_models = _categorize_groq_models(data)
+
+            # Detect vision-capable models
+            vision_models = _detect_vision_models(data)
+
+            # Update cache
+            _groq_model_cache["models"] = categorized_models
+            _groq_model_cache["vision_models"] = vision_models
+            _groq_model_cache["last_fetch"] = now
+
+            return categorized_models, vision_models
+
+        except Exception:
+            _groq_model_cache["last_failure"] = now
+            # Return previously cached results if available
+            if _groq_model_cache["models"] is not None:
+                return _groq_model_cache["models"], _groq_model_cache["vision_models"]
+            # Return static fallback
+            return _get_static_fallback_models()
 
 
 # ============================================================================
@@ -444,6 +442,12 @@ class GroqNode(io.ComfyNode):
                     optional=True,
                     tooltip="Optional image input for vision-capable models (qwen/qwen3.6-27b at time of writing). The image is always sent and Groq decides whether the model accepts it, so newly released vision models work without updating this node. Maximum size: 2048x2048 (only the first image of a batch is sent)."
                 ),
+                io.Combo.Input(
+                    "image_format",
+                    options=["png", "jpeg"],
+                    default="png",
+                    tooltip="Encoding for the attached image. PNG is lossless (best for screenshots and text); JPEG produces a much smaller request for photographic content, cutting latency and token overhead."
+                ),
                 io.String.Input(
                     "additional_params",
                     default="",
@@ -533,6 +537,7 @@ class GroqNode(io.ComfyNode):
         seed_value: int,
         max_retries: int,
         debug_mode: str,
+        image_format: str = "png",
         image_input=None,
         additional_params: str = ""
     ) -> io.NodeOutput:
@@ -568,7 +573,8 @@ Key Settings:
 - Seed Mode: fixed / random / increment / decrement
 - Seed Value: seed used by 'fixed' mode (0-9007199254740991)
 - Max Retries: auto-retry on rate limits and 5xx errors (0-5)
-- Debug Mode: include the request body in 400-error messages
+- Debug Mode: include the request body in 400-error messages (image data
+  is summarized rather than dumped)
 
 Optional:
 - Image Input: for vision-capable models (qwen/qwen3.6-27b at time of writing)
@@ -577,6 +583,7 @@ Optional:
     node shipped works immediately, with no update here
   * If Groq refuses it, the error carries a hint about what did look capable
   * Max size: 2048x2048 per dimension; only the first image of a batch is sent
+- Image Format: PNG (lossless) or JPEG (smaller payload for photos)
 - Additional Params: extra Groq parameters as a JSON object, merged into the
   request body (it overrides the widgets above on key collisions)
 
@@ -612,7 +619,6 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             if not user_prompt or not user_prompt.strip():
                 return io.NodeOutput("", "User prompt is required", help_text)
 
-
             # Use manual_model if "Manual Input" is selected
             actual_model = manual_model.strip() if model == "Manual Input" else model
 
@@ -635,21 +641,11 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             # Counters are keyed by (model, starting seed) and capped so long-running
             # sessions cannot grow this dict without bound.
             node_key = (actual_model, seed_value)
-            if seed_mode == "random":
-                seed = random.randint(0, cls.MAX_SAFE_INTEGER)
-            elif seed_mode == "increment":
-                last_seed = cls._last_seed.get(node_key, seed_value)
-                seed = (last_seed + 1) % cls.MAX_SAFE_INTEGER
-            elif seed_mode == "decrement":
-                last_seed = cls._last_seed.get(node_key, seed_value)
-                seed = (last_seed - 1) if last_seed > 0 else cls.MAX_SAFE_INTEGER
-            else:  # "fixed"
-                seed = seed_value
-
-            # Store the seed we're using
-            if len(cls._last_seed) >= cls.MAX_TRACKED_SEEDS:
-                cls._last_seed.clear()
-            cls._last_seed[node_key] = seed
+            with chat_common.LOCK:
+                seed = chat_common.derive_seed(
+                    cls._last_seed, node_key, seed_mode, seed_value, cls.MAX_SAFE_INTEGER)
+                chat_common.store_seed(
+                    cls._last_seed, node_key, seed, cls.MAX_TRACKED_SEEDS)
 
             # Warm the module cache so a later ComfyUI Refresh can rebuild the
             # dropdown from the live Groq model list.
@@ -694,55 +690,15 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             # here on a capability guess would silently drop the user's image.
             if image_input is not None:
                 try:
-                    # Process image for vision models
                     if isinstance(image_input, torch.Tensor):
-                        # ComfyUI IMAGE tensors are [batch, height, width, channels];
-                        # take the first frame rather than failing on batches > 1.
-                        if image_input.dim() == 4:
-                            image_input = image_input[0]
-                        if image_input.dim() != 3:
-                            return io.NodeOutput(
-                                "",
-                                f"Error: Expected a 3D or 4D image tensor, got {image_input.dim()}D",
-                                help_text
-                            )
-
-                        if image_input.shape[-1] in [1, 3, 4]:
-                            image_input = image_input.permute(2, 0, 1)
-
-                        image_input = image_input.cpu()
-                        # ComfyUI IMAGE tensors are floats in 0..1; clamping keeps an
-                        # out-of-range upstream result from wrapping around on convert.
-                        # Integer tensors are already in 0..255 and must not be clamped.
-                        if image_input.is_floating_point():
-                            image_input = image_input.clamp(0, 1)
-                        pil_image = ToPILImage()(image_input)
+                        pil_image = chat_common.tensor_to_pil(image_input)
                     elif isinstance(image_input, Image.Image):
                         pil_image = image_input
                     else:
                         return io.NodeOutput("", "Error: Unsupported image input type", help_text)
 
-                    # Validate image dimensions (max 2048 in either dimension)
-                    if pil_image.size[0] > 2048 or pil_image.size[1] > 2048:
-                        return io.NodeOutput(
-                            "",
-                            f"Error: Image too large ({pil_image.size[0]}x{pil_image.size[1]}). Maximum is 2048 pixels in either dimension. Please resize your image.",
-                            help_text
-                        )
-
-                    # Convert image to base64
-                    buffered = python_io.BytesIO()
-                    pil_image.save(buffered, format="PNG")
-                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-                    # Add user message with image for vision models
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}}
-                        ]
-                    })
+                    messages.append(chat_common.encode_image_message(
+                        pil_image, user_prompt, image_format))
                 except Exception as img_err:
                     return io.NodeOutput("", f"Image Processing Error: {str(img_err)}", help_text)
             else:
@@ -759,12 +715,9 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                 "temperature": temperature,
                 "top_p": top_p,
                 # Groq deprecated "max_tokens" in favour of "max_completion_tokens"
-                "max_completion_tokens": max_completion_tokens
+                "max_completion_tokens": max_completion_tokens,
+                "seed": seed
             }
-
-            # Add seed
-            if seed is not None:
-                body["seed"] = seed
 
             # Only add penalty parameters if non-zero (not all models support them)
             if frequency_penalty != 0:
@@ -787,99 +740,77 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     return io.NodeOutput("", "Error: Additional parameters must be a JSON object. Example format: {\"stop\": [\"\\n\"]}", help_text)
                 body.update(extra_params)
 
-            # Make API request with retry logic
-            retries = 0
-            while True:
+            response, transport_error = chat_common.post_with_retries(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                body=body,
+                max_retries=max_retries,
+            )
+
+            if transport_error is not None:
+                return io.NodeOutput("", transport_error, help_text)
+
+            # Handle 400 errors with detailed information
+            if response.status_code == 400:
                 try:
-                    response = requests.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json=body,
-                        timeout=120
+                    error_json = response.json()
+                    error_message = error_json.get("error", {}).get("message", "Unknown error")
+
+                    if debug_mode == "on":
+                        return io.NodeOutput(
+                            "",
+                            f"Error 400: {error_message}{vision_hint}"
+                            f"\n\nRequest body:\n{json.dumps(chat_common.redact_body(body), indent=2)}",
+                            help_text
+                        )
+                    else:
+                        return io.NodeOutput("", f"Error 400: {error_message}{vision_hint}", help_text)
+                except Exception:
+                    return io.NodeOutput(
+                        "",
+                        "Error: Bad request - check model name and parameters (enable debug mode for details)",
+                        help_text
                     )
 
-                    # Define retryable status codes
-                    retryable_codes = {429, 500, 502, 503, 504}
+            # Handle other response codes
+            if response.status_code == 401:
+                return io.NodeOutput("", "Error: Invalid API key", help_text)
+            elif response.status_code == 429:
+                return io.NodeOutput(
+                    "", f"Error: Rate limit exceeded even after {max_retries + 1} attempt(s)", help_text)
+            elif response.status_code != 200:
+                return io.NodeOutput(
+                    "", f"Error: API returned status {response.status_code}", help_text)
 
-                    if response.status_code in retryable_codes and retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)  # Exponential backoff: 2, 4, 8, 16... seconds
-                        continue
+            try:
+                response_json = response.json()
+            except requests.exceptions.JSONDecodeError:
+                # A 200 with a malformed body is not worth retrying
+                return io.NodeOutput("", "Error: Invalid JSON response from Groq", help_text)
 
-                    # Handle 400 errors with detailed information
-                    if response.status_code == 400:
-                        try:
-                            error_json = response.json()
-                            error_message = error_json.get("error", {}).get("message", "Unknown error")
+            # Extract information for status
+            model_used = response_json.get("model", "unknown")
+            tokens = response_json.get("usage", {})
+            prompt_tokens = tokens.get("prompt_tokens", 0)
+            completion_tokens = tokens.get("completion_tokens", 0)
+            total_tokens = prompt_tokens + completion_tokens
 
-                            if debug_mode == "on":
-                                return io.NodeOutput(
-                                    "",
-                                    f"Error 400: {error_message}{vision_hint}\n\nRequest body:\n{json.dumps(body, indent=2)}",
-                                    help_text
-                                )
-                            else:
-                                return io.NodeOutput("", f"Error 400: {error_message}{vision_hint}", help_text)
-                        except Exception:
-                            return io.NodeOutput(
-                                "",
-                                "Error: Bad request - check model name and parameters (enable debug mode for details)",
-                                help_text
-                            )
+            status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
 
-                    # Handle other response codes
-                    if response.status_code == 401:
-                        return io.NodeOutput("", "Error: Invalid API key", help_text)
-                    elif response.status_code == 429:
-                        return io.NodeOutput("", f"Error: Rate limit exceeded. Tried {retries} times", help_text)
-                    elif response.status_code != 200:
-                        return io.NodeOutput("", f"Error: API returned status {response.status_code}. Tried {retries} times", help_text)
-
-                    response_json = response.json()
-
-                    # Extract information for status
-                    model_used = response_json.get("model", "unknown")
-                    tokens = response_json.get("usage", {})
-                    prompt_tokens = tokens.get("prompt_tokens", 0)
-                    completion_tokens = tokens.get("completion_tokens", 0)
-                    total_tokens = prompt_tokens + completion_tokens
-
-                    status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
-
-                    if "choices" in response_json and len(response_json["choices"]) > 0:
-                        content = response_json["choices"][0].get("message", {}).get("content", "")
-                        return io.NodeOutput(content, status_msg, help_text)
-                    else:
-                        return io.NodeOutput("", "Error: No response content from model", help_text)
-
-                except requests.exceptions.JSONDecodeError:
-                    # A 200 with a malformed body is not worth retrying
-                    return io.NodeOutput("", "Error: Invalid JSON response from Groq", help_text)
-                except requests.exceptions.RequestException as req_err:
-                    # Retry network-related errors
-                    if retries < max_retries:
-                        retries += 1
-                        time.sleep(2 ** retries)
-                        continue
-                    return io.NodeOutput("", f"Network Error: {str(req_err)}. Tried {retries} times.", help_text)
+            if "choices" in response_json and len(response_json["choices"]) > 0:
+                content = response_json["choices"][0].get("message", {}).get("content", "")
+                return io.NodeOutput(content, status_msg, help_text)
+            else:
+                return io.NodeOutput("", "Error: No response content from model", help_text)
 
         except Exception as e:
+            # ComfyUI's cancel signal must propagate, not become a chat error.
+            if type(e).__name__ == "InterruptProcessingException":
+                raise
             return io.NodeOutput("", f"Unexpected Error: {str(e)}", help_text)
-
-
-class GroqExtension(ComfyExtension):
-    """Extension class for Groq nodes"""
-
-    async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [GroqNode]
-
-
-async def comfy_entrypoint() -> ComfyExtension:
-    """Entry point for ComfyUI v3"""
-    return GroqExtension()
 
 
 # Legacy v1 compatibility (for nodes that still use old API)

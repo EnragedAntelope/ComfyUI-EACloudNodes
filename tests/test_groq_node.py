@@ -448,7 +448,9 @@ def test_rate_limit_is_retried_then_reported(groq_call, no_sleep):
     out = groq_call(responses=responses, max_retries=2)
     assert "Rate limit exceeded" in out.args[1]
     assert len(groq_call.calls["calls"]) == 3
-    assert no_sleep == [2, 4]
+    # Jittered exponential backoff: two sleeps inside the 1..4s band.
+    assert len(no_sleep) == 2
+    assert all(1 <= s <= 4 for s in no_sleep)
 
 
 def test_server_error_recovers_on_retry(groq_call, no_sleep):
@@ -490,3 +492,62 @@ def test_empty_choices_is_reported(groq_call):
 def test_api_key_is_never_echoed_into_outputs(groq_call):
     out = groq_call(responses=[FakeResponse(400, {"error": {"message": "bad"}})], debug_mode="on")
     assert "test-key" not in "".join(out.args)
+
+
+# --------------------------------------------------------------------------
+# v2.2.0: shared-image pipeline, redaction, eviction, interrupts
+# --------------------------------------------------------------------------
+
+
+def test_jpeg_format_produces_a_jpeg_data_url(groq_call):
+    import base64
+    import io as py_io
+
+    from PIL import Image as PILImage
+
+    out = groq_call(model=VISION_MODEL, send_system="no",
+                    image_input=torch.rand(1, 16, 16, 3), image_format="jpeg")
+    assert out.args[0] == "hello"
+    url = _image_content(groq_call.calls["calls"][0])[1]["image_url"]["url"]
+    assert url.startswith("data:image/jpeg;base64,")
+    decoded = PILImage.open(py_io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
+    assert decoded.format == "JPEG"
+
+
+def test_debug_body_redacts_image_data(groq_call):
+    """A multi-megabyte base64 blob must not land in the UI status field."""
+    out = groq_call(responses=[FakeResponse(400, {"error": {"message": "bad"}})],
+                    model=VISION_MODEL, send_system="no",
+                    image_input=torch.rand(1, 32, 32, 3), debug_mode="on")
+    assert "Request body" in out.args[1]
+    assert "redacted data URI" in out.args[1]
+    # The PNG magic constant as it appears once base64-encoded.
+    assert "iVBORw0KGgo" not in out.args[1]
+
+
+def test_seed_eviction_keeps_the_newest_counters(groq_call):
+    for i in range(GroqNode.MAX_TRACKED_SEEDS + 5):
+        groq_call(seed_mode="increment", seed_value=i)
+    assert len(GroqNode._last_seed) <= GroqNode.MAX_TRACKED_SEEDS
+    key = ("openai/gpt-oss-120b", GroqNode.MAX_TRACKED_SEEDS + 4)
+    groq_call(seed_mode="increment", seed_value=GroqNode.MAX_TRACKED_SEEDS + 4)
+    assert GroqNode._last_seed[key] == GroqNode.MAX_TRACKED_SEEDS + 6
+
+
+def test_interrupt_is_not_swallowed(monkeypatch, groq_call):
+    """Cancelling the queue must propagate, not turn into a chat error."""
+    import sys
+    import types
+
+    class InterruptProcessingException(Exception):
+        pass
+
+    comfy_pkg = types.ModuleType("comfy")
+    model_management = types.ModuleType("comfy.model_management")
+    model_management.throw_exception_if_processing_interrupted = (
+        lambda: (_ for _ in ()).throw(InterruptProcessingException()))
+    monkeypatch.setitem(sys.modules, "comfy", comfy_pkg)
+    monkeypatch.setitem(sys.modules, "comfy.model_management", model_management)
+
+    with pytest.raises(InterruptProcessingException):
+        groq_call()
