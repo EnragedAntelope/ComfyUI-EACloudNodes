@@ -153,7 +153,7 @@ def test_output_counts_match_what_execute_returns():
 
 
 def test_declared_dependencies_are_actually_imported():
-    """requirements.txt should list only what the modules import beyond what ComfyUI provides."""
+    """requirements.txt must declare nothing beyond what ComfyUI already provides."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "requirements.txt"), encoding="utf-8") as handle:
         declared = {
@@ -169,16 +169,22 @@ def test_declared_dependencies_are_actually_imported():
     # ComfyUI environment has them; declaring them only adds install steps.
     assert "pillow" not in declared
     assert "requests" not in declared
-    sources = "".join(
-        open(os.path.join(root, name), encoding="utf-8").read()
-        for name in ("groq_node.py", "openrouter.py", "openrouter_models.py",
-                     "chat_common.py")
-    )
-    import_names = {"pillow": "from PIL", "requests": "import requests",
-                    "torch": "import torch"}
-    for package in declared:
-        assert package in import_names, f"undeclared package in requirements: {package}"
-        assert import_names[package] in sources, f"{package} is listed but never imported"
+    # The pack owns no dependencies of its own; once the ComfyUI-owned names
+    # above are excluded the file must be empty. The asserts above give the
+    # specific error for the likely regressions; this one catches anything else.
+    assert not declared, f"requirements.txt must stay empty; found: {sorted(declared)}"
+
+
+def test_pyproject_declares_no_dependencies():
+    """Both manifests must stay dependency-free, not just requirements.txt."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "pyproject.toml"), encoding="utf-8") as handle:
+        text = handle.read()
+    deps = [line.strip() for line in text.splitlines()
+            if line.strip().startswith("dependencies")]
+    assert deps and deps[0] == "dependencies = []", (
+        "pyproject.toml must declare `dependencies = []` — everything the pack "
+        "imports ships with ComfyUI (see the requirements.txt guard)")
 
 
 def test_pyproject_version_is_semver():

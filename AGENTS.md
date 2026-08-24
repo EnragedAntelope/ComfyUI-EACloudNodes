@@ -8,15 +8,15 @@ legacy `NODE_CLASS_MAPPINGS`.
 
 _Last verified: 2026-08-24_
 
-- **Status**: v2.2.1 on branch `temp/v2.2.1-dependency-cleanup` (pending merge).
-  pillow/requests dropped from both manifests — ComfyUI's own requirements ship
-  both, so the pack declares zero dependencies of its own. Publish-workflow
-  Node 20 warning investigated: originates inside the pinned
-  `Comfy-Org/publish-node-action` (internal `setup-python@v5`); upstream main
-  has not moved since 2025-05-10, so there is nothing newer to pin — documented
-  in PROJECT_NOTES.md. Prior state: external audit remediated and reviewed
-  (relative sibling imports, endpoint policy enforced at execution, suite loads
-  the pack ComfyUI's way).
+- **Status**: v2.2.1 on `main` — zero-dependency packaging: pillow/requests
+  dropped from both manifests (ComfyUI's own requirements ship both, so the
+  pack declares no dependencies of its own; the guard test now covers both
+  manifests). Publish-workflow Node 20 warning investigated: originates inside
+  the pinned `Comfy-Org/publish-node-action` (internal `setup-python@v5`);
+  upstream main has not moved since 2025-05-10, so there is nothing newer to
+  pin — documented in PROJECT_NOTES.md. Prior state: external audit remediated
+  and reviewed (relative sibling imports, endpoint policy enforced at
+  execution, suite loads the pack ComfyUI's way).
 - **Works**: all three nodes; offline pytest suite (no network or API keys needed — `python -m pytest tests` reports the count); vision via tensor→PIL in `chat_common.py` (no torchvision).
 - **In progress**: nothing.
 - **Known gaps**: seed counters are keyed by `(model, seed_value)` — two nodes sharing both advance one counter, because the v3 execute API exposes no per-instance id. Accepted.
