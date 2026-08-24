@@ -88,17 +88,21 @@ def test_output_counts_match_what_execute_returns():
 def test_declared_dependencies_are_actually_imported():
     """requirements.txt should list what the modules import, and nothing stale."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "requirements.txt")) as handle:
+    with open(os.path.join(root, "requirements.txt"), encoding="utf-8") as handle:
         declared = {
             line.split(">=")[0].split("==")[0].strip().lower()
             for line in handle if line.strip()
         }
+    # torch/torchvision belong to ComfyUI's environment; declaring them risks
+    # pip replacing a working CUDA build with a CPU-only wheel.
+    assert "torch" not in declared
+    assert "torchvision" not in declared
     sources = "".join(
-        open(os.path.join(root, name)).read()
+        open(os.path.join(root, name), encoding="utf-8").read()
         for name in ("groq_node.py", "openrouter.py", "openrouter_models.py")
     )
     import_names = {"pillow": "from PIL", "requests": "import requests",
-                    "torch": "import torch", "torchvision": "from torchvision"}
+                    "torch": "import torch"}
     for package in declared:
         assert package in import_names, f"undeclared package in requirements: {package}"
         assert import_names[package] in sources, f"{package} is listed but never imported"
@@ -106,9 +110,9 @@ def test_declared_dependencies_are_actually_imported():
 
 def test_pyproject_version_is_semver():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(root, "pyproject.toml")) as handle:
+    with open(os.path.join(root, "pyproject.toml"), encoding="utf-8") as handle:
         text = handle.read()
-    version = [l for l in text.splitlines() if l.startswith("version")][0]
+    version = [line for line in text.splitlines() if line.startswith("version")][0]
     number = version.split("=")[1].strip().strip('"')
     parts = number.split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts), number
@@ -233,7 +237,7 @@ def test_no_provider_lookup_happens_at_import_time():
     import ast
 
     for module in (groq_node, openrouter, openrouter_models):
-        tree = ast.parse(open(module.__file__).read())
+        tree = ast.parse(open(module.__file__, encoding="utf-8").read())
         # Only module-level statements run at import; skip function and class bodies.
         toplevel = [n for n in tree.body
                     if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
