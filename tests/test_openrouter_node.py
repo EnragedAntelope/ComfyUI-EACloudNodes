@@ -326,3 +326,39 @@ def test_retry_after_header_is_honoured(openrouter_call, no_sleep):
     out = openrouter_call(responses=responses, max_retries=2)
     assert out.args[0] == "hello"
     assert no_sleep == [7]
+
+
+def test_execute_refuses_plain_http_even_without_validate_inputs(openrouter_call):
+    """
+    validate_inputs only sees a literal widget value. Once base_url is converted
+    to an input socket its value is unknown until the graph runs, so execute()
+    must enforce the endpoint policy itself - it is where the key is sent.
+    """
+    out = openrouter_call(base_url="http://evil.example.com/v1")
+    assert out.args[0] == ""
+    assert "plain http://" in out.args[1]
+    assert openrouter_call.calls["calls"] == []   # nothing left the machine
+
+
+def test_execute_still_allows_a_localhost_http_proxy(openrouter_call):
+    out = openrouter_call(base_url="http://127.0.0.1:8080/v1")
+    assert out.args[0] == "hello"
+    assert openrouter_call.calls["calls"][0]["url"] == "http://127.0.0.1:8080/v1"
+
+
+def test_execute_rejects_a_non_http_scheme(openrouter_call):
+    out = openrouter_call(base_url="file:///etc/passwd")
+    assert out.args[0] == ""
+    assert "must start with http:// or https://" in out.args[1]
+    assert openrouter_call.calls["calls"] == []
+
+
+def test_custom_endpoint_warning_does_not_claim_an_unsent_key(openrouter_call):
+    """
+    An early validation failure sends nothing. Saying the key 'was sent' there
+    would be a false alarm on the one message a user must be able to trust.
+    """
+    out = openrouter_call(base_url="https://proxy.example.com/v1", user_prompt="  ")
+    assert openrouter_call.calls["calls"] == []
+    assert "were sent to" not in out.args[1]
+    assert "proxy.example.com" in out.args[1]     # still flags the endpoint

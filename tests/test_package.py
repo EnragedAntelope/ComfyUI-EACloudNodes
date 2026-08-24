@@ -1,13 +1,80 @@
 """Tests for how the pack presents itself to ComfyUI."""
 import inspect
 import os
+import subprocess
+import sys
+import textwrap
 
 import groq_node
 import openrouter
 import openrouter_models
 
+from conftest import REPO_ROOT, TESTS_DIR
+
 NODE_MODULES = (groq_node, openrouter, openrouter_models)
 NODE_CLASSES = (groq_node.GroqNode, openrouter.OpenrouterNode, openrouter_models.OpenRouterModels)
+
+
+def test_the_pack_loads_the_way_comfyui_loads_it():
+    """
+    ComfyUI executes a custom node's __init__.py under a synthetic module name and
+    never adds the pack folder to sys.path. A sibling module imported absolutely
+    (`import chat_common`) therefore resolves in a test process that has the repo
+    root on sys.path, and raises ModuleNotFoundError inside ComfyUI - taking the
+    registration of every node in the pack with it.
+
+    Run the load in a clean interpreter so nothing already in this process's
+    sys.modules can hide the failure.
+    """
+    script = textwrap.dedent(
+        """
+        import importlib.util, json, os, sys
+        tests_dir, repo_root = sys.argv[1], sys.argv[2]
+        sys.path.insert(0, tests_dir)
+        import comfy_stub
+        comfy_stub.install()
+        sys.path.remove(tests_dir)
+        # Mirror ComfyUI: the pack folder is not importable by name.
+        sys.path[:] = [p for p in sys.path
+                       if os.path.abspath(p or os.getcwd()) != os.path.abspath(repo_root)]
+        spec = importlib.util.spec_from_file_location(
+            "comfyui_loaded_pack", os.path.join(repo_root, "__init__.py"),
+            submodule_search_locations=[repo_root])
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["comfyui_loaded_pack"] = module
+        spec.loader.exec_module(module)
+        print(json.dumps(sorted(module.NODE_CLASS_MAPPINGS)))
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, TESTS_DIR, REPO_ROOT],
+        capture_output=True, text=True, cwd=os.path.dirname(REPO_ROOT),
+    )
+    assert result.returncode == 0, (
+        "the pack failed to load the way ComfyUI loads it:\n" + result.stderr)
+    assert "GroqNode" in result.stdout
+    assert "OpenrouterNode" in result.stdout
+    assert "OpenRouterModels" in result.stdout
+
+
+def test_sibling_imports_are_relative():
+    """
+    The guard above catches this at load time; this one names the cause, so a
+    reviewer sees which line to change rather than a ModuleNotFoundError.
+    """
+    siblings = {"chat_common", "groq_node", "openrouter", "openrouter_models"}
+    for name in ("__init__.py", "groq_node.py", "openrouter.py",
+                 "openrouter_models.py", "chat_common.py"):
+        source = open(os.path.join(REPO_ROOT, name), encoding="utf-8").read()
+        for line in source.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("import "):
+                continue
+            imported = stripped[len("import "):].split(" as ")[0].split(".")[0].strip()
+            assert imported not in siblings, (
+                f"{name}: `{stripped}` must be a relative import "
+                f"(`from . import {imported}`) - ComfyUI does not put the pack "
+                "folder on sys.path")
 
 
 def test_every_module_exposes_v1_mappings():
@@ -99,7 +166,8 @@ def test_declared_dependencies_are_actually_imported():
     assert "torchvision" not in declared
     sources = "".join(
         open(os.path.join(root, name), encoding="utf-8").read()
-        for name in ("groq_node.py", "openrouter.py", "openrouter_models.py")
+        for name in ("groq_node.py", "openrouter.py", "openrouter_models.py",
+                     "chat_common.py")
     )
     import_names = {"pillow": "from PIL", "requests": "import requests",
                     "torch": "import torch"}

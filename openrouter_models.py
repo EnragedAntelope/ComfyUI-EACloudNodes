@@ -232,13 +232,17 @@ class OpenRouterModels(io.ComfyNode):
             # Format output with detailed model information and clear formatting
             model_list = []
             for model in models_data:
+                # `or {}` rather than a get() default: OpenRouter sends an explicit
+                # null pricing for some entries, and .get("pricing", {}) returns the
+                # None, not the default - one such entry would blank the whole list.
+                pricing = model.get("pricing") or {}
                 model_info = (
                     f"ID: {model.get('id')}\n"
                     f"Name: {model.get('name')}\n"
                     f"Context Length: {model.get('context_length')}\n"
                     f"Pricing (per token):\n"
-                    f"  Prompt: ${model.get('pricing', {}).get('prompt', 'N/A')}\n"
-                    f"  Completion: ${model.get('pricing', {}).get('completion', 'N/A')}\n"
+                    f"  Prompt: ${pricing.get('prompt', 'N/A')}\n"
+                    f"  Completion: ${pricing.get('completion', 'N/A')}\n"
                     f"{'=' * 40}\n"
                 )
                 model_list.append(model_info)
@@ -256,6 +260,10 @@ class OpenRouterModels(io.ComfyNode):
             )
 
         except Exception as e:
+            # ComfyUI's cancel signal must propagate, not become a node error.
+            # Matched by name so this module stays importable outside ComfyUI.
+            if type(e).__name__ == "InterruptProcessingException":
+                raise
             return io.NodeOutput(
                 "",
                 f"⚠️ Unexpected Error: {str(e)}.\n- Check all input parameters\n- If the error persists, report the issue"

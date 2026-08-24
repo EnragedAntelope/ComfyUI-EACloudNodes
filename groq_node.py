@@ -9,7 +9,9 @@ import time
 from PIL import Image
 import torch
 
-import chat_common
+# Relative: ComfyUI loads this folder as a package and never puts it on
+# sys.path, so an absolute `import chat_common` fails at registration time.
+from . import chat_common
 from comfy_api.latest import io
 
 # ============================================================================
@@ -337,7 +339,7 @@ class GroqNode(io.ComfyNode):
                     "model",
                     options=model_options,
                     default=default_model,
-                tooltip="Select a Groq model or choose 'Manual Input'. Categories: Featured, Production (stable), Preview (evaluation). Use ComfyUI Refresh to update model list from Groq API."
+                    tooltip="Select a Groq model or choose 'Manual Input'. Categories: Featured, Production (stable), Preview (evaluation). Use ComfyUI Refresh to update model list from Groq API."
                 ),
                 io.String.Input(
                     "manual_model",

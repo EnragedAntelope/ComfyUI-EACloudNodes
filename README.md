@@ -308,13 +308,26 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 ## Version History
 
 ### v2.2.0 (Current)
+- **Fixed: the pack failed to register in ComfyUI**
+  - The new shared module was imported absolutely (`import chat_common`). ComfyUI
+    executes a custom node's `__init__.py` under a synthetic module name and never
+    adds the folder to `sys.path`, so this raised `ModuleNotFoundError` and no node
+    in the pack loaded. Sibling imports are now relative
+  - The test suite now loads the repository the way ComfyUI does, and re-runs that
+    load in a clean interpreter, so this class of failure cannot pass again
 - **Security**
   - OpenRouter: `base_url` must now be `https://` unless it points at localhost.
     A shared workflow could previously point the endpoint at an attacker host and
     receive the user's API key silently; a non-OpenRouter endpoint also prints a
     visible warning on every run
+    The endpoint rule is enforced in `execute()` as well as at validation time,
+    because a `base_url` converted to an input socket has no value ComfyUI can
+    validate before the graph runs
   - Debug mode no longer dumps multi-megabyte base64 image data into the status
     output; data URIs are summarized instead
+  - The custom-endpoint warning no longer says the key "was sent" on paths that
+    sent nothing (an early validation failure), so the one message a user must be
+    able to trust stays accurate
 - **Packaging**
   - Removed `torch`/`torchvision` from `requirements.txt` and `pyproject.toml` —
     ComfyUI's environment owns torch (often a CUDA-specific build), and pip could
@@ -337,7 +350,9 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
     moved into `chat_common.py`, removing ~300 duplicated lines
   - Removed dead per-module Extension classes and `comfy_entrypoint()`s; the
     combined extension in `__init__.py` is the only v3 entry path
-  - Publish workflow permissions reduced to `contents: read`
+  - Publish workflow permissions reduced to `contents: read`; both actions pinned
+    to immutable commit SHAs (`@v1` is a mutable branch), checkout no longer
+    persists credentials for the third-party publish step
 
 ### v2.1.0
 - **Model list refreshed against Groq's current catalogue**
@@ -463,7 +478,7 @@ hardcoded names are only a fallback, and nothing is refused on a guess.**
 | --- | --- |
 | New model released | Appears in the dropdown on the next Refresh. Anything the pack does not recognise is listed under `--- Other ---` rather than hidden. |
 | Default model retired | The default is resolved against the list that actually loaded, walking a preference order and then falling back to the first real entry. A retired default can no longer break the node on a fresh drop-in. |
-| New vision model | Works immediately. An attached image is always sent and the provider decides — the node never refuses one from its own capability list. |
+| New vision model | Groq: works immediately — an attached image is always sent and Groq decides, so the node never refuses one from its own capability list. OpenRouter: refused only when its public catalogue positively lists the model as text-only; an unknown id is passed straight through. |
 | A model's name trips a heuristic | Affirmative modality metadata always wins. A chat model called `…-tts-…` or `…-embed-…` stays listed if the API says it emits text. |
 | Provider adds modality fields | Read automatically. Several plausible field names are checked, and an entry that reports nothing is treated as "unknown", never as "unsupported". |
 | Provider is unreachable | Groq falls back to a static list and backs off for 60s. OpenRouter offers `Manual Input`, which reaches any model id. |
@@ -481,9 +496,13 @@ Run the test suite (no API keys and no network access required — every HTTP ca
 stubbed):
 
 ```bash
-pip install pytest
+pip install pytest pillow requests torch numpy   # torch normally comes from ComfyUI
 python -m pytest tests
 ```
+
+The suite loads the repository the way ComfyUI does — from `__init__.py`, with the
+pack folder absent from `sys.path` — so a sibling module imported absolutely fails
+here rather than at node registration.
 
 ## Contributing
 

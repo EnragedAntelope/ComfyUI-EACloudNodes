@@ -5,6 +5,34 @@
 An independent review of the v2.1.0 branch was verified finding-by-finding
 against the code before anything was changed. Fixes:
 
+- **The remediation branch itself did not load in ComfyUI.** Extracting
+  `chat_common.py` introduced `import chat_common` — an absolute import of a
+  sibling. ComfyUI builds a spec from the pack's `__init__.py` under a synthetic
+  module name and never adds the folder to `sys.path`, so the import raised
+  `ModuleNotFoundError` and *no node in the pack registered*. The full suite was
+  green throughout, because `conftest.py` put the repo root on `sys.path` and
+  imported the modules as top-level ones — the real registration path was never
+  exercised. Sibling imports are now relative; the suite loads the pack the way
+  ComfyUI does; and `test_package.py` re-runs that load in a subprocess so no
+  alias in the test process can hide a regression. Both new guards were confirmed
+  to fail with the fix removed.
+
+  The lesson generalises: a green suite proves the paths it covers work, never
+  that the artifact loads where it actually runs. Test the entry point the host
+  uses, not a convenient stand-in for it.
+- **Endpoint policy enforced at execution, not only at validation.** The
+  https-only rule lived in `validate_inputs`, which ComfyUI can only run against
+  a literal widget value. Convert `base_url` to an input socket and its value is
+  unknown until the graph runs, leaving `execute()` free to POST the key to a
+  plain-http host. `_endpoint_error()` is now the single rule both call. The
+  "Custom endpoint" warning also stopped claiming the key "was sent" on paths
+  that sent nothing — a false alarm on a security message is worse than none.
+- **Publish workflow supply chain.** `Comfy-Org/publish-node-action@v1` resolves
+  to a mutable *branch*, so upstream could change what runs with the registry
+  token at any time. Both actions are now pinned to commit SHAs, checkout uses
+  `persist-credentials: false` so the `GITHUB_TOKEN` is not left in `.git/config`
+  for a third-party step, and `skip_checkout` removes the action's own duplicate
+  (unhardened) checkout.
 - **Key-exfiltration surface (OpenRouter).** `base_url` is a widget, workflows
   are shared as JSON, and the `Authorization` header went to whatever URL it
   named — validation only checked the scheme prefix. Now: `https://` required

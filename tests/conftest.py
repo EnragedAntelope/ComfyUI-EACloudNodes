@@ -1,18 +1,56 @@
+import importlib.util
 import os
 import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(TESTS_DIR)
+
+# Only tests/ goes on sys.path, for comfy_stub. The repository root deliberately
+# does NOT: ComfyUI never puts a custom-node folder on sys.path either, so adding
+# it here would let a sibling module imported absolutely pass the suite and then
+# fail at registration inside ComfyUI. See load_pack() below.
+sys.path.insert(0, TESTS_DIR)
 
 import comfy_stub  # noqa: E402
 
 comfy_stub.install()
 
-import groq_node  # noqa: E402
-import openrouter  # noqa: E402
-import openrouter_models  # noqa: E402
+PACKAGE_NAME = "eacloudnodes_under_test"
+
+
+def load_pack(module_name=PACKAGE_NAME, path=REPO_ROOT):
+    """
+    Import the repository the way ComfyUI's load_custom_node() does.
+
+    ComfyUI builds a spec from the folder's __init__.py under a synthetic module
+    name and executes it; the folder itself is never importable by name. Loading
+    the same way here means the suite exercises the real registration path.
+    """
+    spec = importlib.util.spec_from_file_location(
+        module_name, os.path.join(path, "__init__.py"),
+        submodule_search_locations=[path],
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+eacloudnodes = load_pack()
+
+# Bind the submodules under their bare names so the test modules can `import
+# groq_node` and still be testing the package-loaded objects. chat_common is
+# deliberately left unbound: nothing outside the package may reach it by a bare
+# name, and test_package.py re-runs the whole load in a clean interpreter.
+groq_node = sys.modules[f"{PACKAGE_NAME}.groq_node"]
+openrouter = sys.modules[f"{PACKAGE_NAME}.openrouter"]
+openrouter_models = sys.modules[f"{PACKAGE_NAME}.openrouter_models"]
+
+sys.modules["groq_node"] = groq_node
+sys.modules["openrouter"] = openrouter
+sys.modules["openrouter_models"] = openrouter_models
 
 
 class FakeResponse:

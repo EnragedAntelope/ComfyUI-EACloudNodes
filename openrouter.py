@@ -10,7 +10,9 @@ from PIL import Image
 import torch
 from urllib.parse import urlsplit
 
-import chat_common
+# Relative: ComfyUI loads this folder as a package and never puts it on
+# sys.path, so an absolute `import chat_common` fails at registration time.
+from . import chat_common
 from comfy_api.latest import io
 
 
@@ -37,6 +39,39 @@ LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "::1"}
 PREFERRED_DEFAULT_MODELS = [
     "meta-llama/llama-3.3-70b-instruct:free",
 ]
+
+
+def _endpoint_error(base_url: str):
+    """
+    Reject an endpoint the API key must not be sent to; None means it is allowed.
+
+    Enforced in execute() as well as validate_inputs(), because validate_inputs
+    only sees a literal widget value - once base_url is converted to an input
+    socket its value is not known until the graph runs, and execute() is the
+    point where the Authorization header actually goes on the wire.
+    """
+    if not base_url or not base_url.strip():
+        return "OpenRouter API endpoint URL is required"
+
+    try:
+        parts = urlsplit(base_url.strip())
+    except ValueError:
+        return "Invalid API endpoint URL format"
+
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+
+    if scheme not in ("http", "https"):
+        return "Invalid API endpoint URL format (must start with http:// or https://)"
+
+    # Workflows are shared as JSON files, and this header carries the user's
+    # key. Plain http would put it on the wire in cleartext; only a local
+    # proxy has a reason to do that.
+    if scheme == "http" and host not in LOCAL_HTTP_HOSTS:
+        return ("Refusing to send your API key over plain http://. Use an "
+                "https:// endpoint, or point base_url at a localhost proxy.")
+
+    return None
 
 
 # Embedding, reranking and speech models are priced at $0 and so pass a
@@ -396,27 +431,9 @@ class OpenrouterNode(io.ComfyNode):
             return "Manual model identifier is required when 'Manual Input' is selected"
 
         # Validate base URL
-        if not base_url or not base_url.strip():
-            return "OpenRouter API endpoint URL is required"
-
-        stripped_url = base_url.strip()
-        try:
-            parts = urlsplit(stripped_url)
-        except ValueError:
-            return "Invalid API endpoint URL format"
-
-        scheme = parts.scheme.lower()
-        host = (parts.hostname or "").lower()
-
-        if scheme not in ("http", "https"):
-            return "Invalid API endpoint URL format (must start with http:// or https://)"
-
-        # Workflows are shared as JSON files, and this header carries the user's
-        # key. Plain http would put it on the wire in cleartext; only a local
-        # proxy has a reason to do that.
-        if scheme == "http" and host not in LOCAL_HTTP_HOSTS:
-            return ("Refusing to send your API key over plain http://. Use an "
-                    "https:// endpoint, or point base_url at a localhost proxy.")
+        endpoint_error = _endpoint_error(base_url)
+        if endpoint_error is not None:
+            return endpoint_error
 
         # Validate additional_params if provided
         additional_params = kwargs.get("additional_params", "")
@@ -528,15 +545,31 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             endpoint_host = (urlsplit((base_url or "").strip()).hostname or "").lower()
         except ValueError:
             endpoint_host = ""
-        endpoint_warning = (
-            f"\n⚠️ Custom endpoint: your API key and prompt were sent to '{endpoint_host}', "
-            "not openrouter.ai." if endpoint_host and endpoint_host != "openrouter.ai" else ""
-        )
+        custom_endpoint = bool(endpoint_host) and endpoint_host != "openrouter.ai"
+
+        # Only claimed once the request has actually been issued: the same status
+        # helper serves the early validation returns, and telling a user their key
+        # was sent when nothing left the machine is its own kind of alarming.
+        request_issued = []
 
         def out(response_text: str, status: str) -> io.NodeOutput:
-            return io.NodeOutput(response_text, status + endpoint_warning, help_text)
+            warning = ""
+            if custom_endpoint and request_issued:
+                warning = (f"\n⚠️ Custom endpoint: your API key and prompt were sent to "
+                           f"'{endpoint_host}', not openrouter.ai.")
+            elif custom_endpoint:
+                warning = (f"\n⚠️ Custom endpoint: base_url points at '{endpoint_host}', "
+                           "not openrouter.ai. Your API key is sent wherever it points.")
+            return io.NodeOutput(response_text, status + warning, help_text)
 
         try:
+            # Re-checked here, not just in validate_inputs: once base_url is
+            # converted to an input socket its value is unknown until the graph
+            # runs, and this is where the Authorization header goes on the wire.
+            endpoint_error = _endpoint_error(base_url)
+            if endpoint_error is not None:
+                return out("", f"Error: {endpoint_error}")
+
             # Sanitize and validate numeric inputs
             try:
                 temperature = max(0.0, min(2.0, float(temperature)))
@@ -658,6 +691,7 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
                     return out("", "Error: Additional parameters must be a JSON object. Example format: {\"top_a\": 0.5}")
                 body.update(extra_params)
 
+            request_issued.append(True)
             response, transport_error = chat_common.post_with_retries(
                 base_url, headers=headers, body=body, max_retries=max_retries)
 
