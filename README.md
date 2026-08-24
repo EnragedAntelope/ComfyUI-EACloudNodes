@@ -7,7 +7,7 @@ registered through the legacy `NODE_CLASS_MAPPINGS` path.
 
 ## Installation
 
-Use [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager) or to manually install:
+Use [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager), or install manually:
 
 1. Clone this repository into your ComfyUI custom_nodes folder:
   ```bash
@@ -39,6 +39,7 @@ The following parameters are available in both OpenRouter and Groq nodes:
 - `seed_mode`: Control reproducibility (Fixed, Random, Increment, Decrement)
 - `max_retries`: Maximum retry attempts (0-5) for recoverable errors
 - `image_input`: Optional image for vision-capable models
+- `image_format`: Encoding for `image_input` — PNG (lossless) or JPEG (much smaller payload for photos)
 - `additional_params`: Optional JSON object for extra model parameters
 
 #### Common Outputs:
@@ -119,6 +120,7 @@ Rows shown as `--- Category ---` are group labels, not selectable models.
 - `max_retries`: Auto-retry attempts for recoverable errors (0-5)
 - `debug_mode`: Enable detailed error messages and request debugging
 - `image_input`: Optional image for vision-capable models (max 2048x2048)
+- `image_format`: PNG (lossless) or JPEG (smaller request for photographic content)
 - `additional_params`: Extra model parameters in JSON format
 
 #### Outputs:
@@ -180,7 +182,9 @@ including pricing and context lengths.
 - `api_key`: ⚠️ Your OpenRouter API key (Get from [https://openrouter.ai/keys](https://openrouter.ai/keys))
 - `model`: Select from free models or choose "Manual Input" for custom models
 - `manual_model`: Enter custom model identifier (only used when "Manual Input" is selected)
-- `base_url`: OpenRouter API endpoint URL (default: https://openrouter.ai/api/v1/chat/completions)
+- `base_url`: OpenRouter API endpoint URL (default: https://openrouter.ai/api/v1/chat/completions).
+  Must be `https://` unless it points at localhost; a non-OpenRouter endpoint prints a visible
+  warning on every run, because your API key is sent wherever `base_url` points.
 - `system_prompt`: Optional system context setting
 - `user_prompt`: Main prompt/question for the model (required)
 - `send_system`: Toggle system prompt on/off
@@ -199,6 +203,7 @@ including pricing and context lengths.
 - `max_retries`: Auto-retry attempts for recoverable errors (0-5)
 - `debug_mode`: Enable detailed error messages and request debugging
 - `image_input`: Optional image for vision models (max 2048x2048)
+- `image_format`: PNG (lossless) or JPEG (smaller request for photographic content)
 - `additional_params`: Extra model parameters in JSON format
 
 #### Outputs:
@@ -302,7 +307,39 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 
 ## Version History
 
-### v2.1.0 (Current)
+### v2.2.0 (Current)
+- **Security**
+  - OpenRouter: `base_url` must now be `https://` unless it points at localhost.
+    A shared workflow could previously point the endpoint at an attacker host and
+    receive the user's API key silently; a non-OpenRouter endpoint also prints a
+    visible warning on every run
+  - Debug mode no longer dumps multi-megabyte base64 image data into the status
+    output; data URIs are summarized instead
+- **Packaging**
+  - Removed `torch`/`torchvision` from `requirements.txt` and `pyproject.toml` —
+    ComfyUI's environment owns torch (often a CUDA-specific build), and pip could
+    clobber it with a CPU-only wheel. The torchvision dependency is gone entirely;
+    tensor conversion now uses torch + PIL directly
+  - Fixed the test suite failing on Windows (`UnicodeDecodeError` on cp1252 locales)
+- **Robustness / UX**
+  - Retries honour the server's `Retry-After` header, use jittered exponential
+    backoff, and check ComfyUI's interrupt signal so a queued Cancel is respected
+    instead of blocking through up to minutes of sleeps
+  - New `image_format` input on both chat nodes: PNG (lossless, default) or JPEG
+    (much smaller payload for photographic content)
+  - Seed-counter eviction removes oldest entries first instead of clearing all
+    tracked counters; model-list caches are now thread-safe
+  - OpenRouter's default-model choice now walks a preference list like Groq's
+    instead of hardcoding one id with an alphabetical fallback
+  - Retry status messages report attempt counts correctly
+- **Housekeeping**
+  - Shared chat-node plumbing (image encoding, seeds, retry loop, redaction)
+    moved into `chat_common.py`, removing ~300 duplicated lines
+  - Removed dead per-module Extension classes and `comfy_entrypoint()`s; the
+    combined extension in `__init__.py` is the only v3 entry path
+  - Publish workflow permissions reduced to `contents: read`
+
+### v2.1.0
 - **Model list refreshed against Groq's current catalogue**
   - `llama-3.3-70b-versatile` (the node's **default**) and `llama-3.1-8b-instant`
     have been retired by Groq. The default is now `openai/gpt-oss-120b`; before

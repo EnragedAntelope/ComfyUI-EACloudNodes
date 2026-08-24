@@ -1,5 +1,50 @@
 ## Version History
 
+### v2.2.0 - External audit remediation
+
+An independent review of the v2.1.0 branch was verified finding-by-finding
+against the code before anything was changed. Fixes:
+
+- **Key-exfiltration surface (OpenRouter).** `base_url` is a widget, workflows
+  are shared as JSON, and the `Authorization` header went to whatever URL it
+  named — validation only checked the scheme prefix. Now: `https://` required
+  unless the host is localhost/127.0.0.1/::1 (local proxies are the one
+  legitimate plain-http case), and any non-`openrouter.ai` endpoint appends a
+  visible "Custom endpoint" warning to every status output. Proxy use stays
+  possible; silent redirection does not.
+- **torch/torchvision removed from both manifests.** ComfyUI's environment owns
+  torch (often CUDA-specific); declaring it invites pip to install a CPU wheel
+  over a working setup. The torchvision import is gone entirely —
+  `chat_common.tensor_to_pil()` does the conversion with torch + PIL. numpy is
+  used for the final array step; it is a hard dependency of ComfyUI itself.
+- **Windows test failures fixed.** Every file read in `tests/test_package.py`
+  now passes `encoding="utf-8"`; the ⚠️ emoji in module sources crashed two
+  tests on cp1252 locales.
+- **Retry loop rewritten** (`chat_common.post_with_retries`): honours 429
+  `Retry-After`, jittered exponential backoff capped at 30s, and calls ComfyUI's
+  interrupt check between attempts so Cancel works mid-retry. The interrupt
+  exception is re-raised by the nodes' outer handlers instead of being converted
+  into a chat error string.
+- **~300 duplicated lines extracted** into `chat_common.py`: image tensor→PIL,
+  data-URI encoding, seed derivation/eviction, retry loop, debug redaction.
+  Divergence between the Groq and OpenRouter copies can no longer accumulate.
+- **Debug dumps redact image data**: `redact_body()` replaces any data URI with
+  a size note, keeping 400 diagnostics readable without multi-MB status strings.
+- **New `image_format` input** on both chat nodes (png default / jpeg q90). JPEG
+  converts non-RGB modes first; PNG behaviour unchanged.
+- **Smaller fixes**: FIFO eviction of seed counters instead of clearing them all;
+  locks around the model caches and seed counters; OpenRouter default chosen by
+  preference walk (`PREFERRED_DEFAULT_MODELS`) mirroring Groq; attempt counts in
+  retry messages corrected; dead per-module Extension classes and
+  `comfy_entrypoint()`s removed (the combined entrypoint in `__init__.py` is the
+  only live path); publish workflow permissions cut to `contents: read`; README
+  installation typo fixed.
+
+Not acted on, deliberately: API keys remain plaintext widget values (inherent to
+ComfyUI's design, documented in tooltips); `additional_params` can override
+request fields (acts on the user's own request); model caches stay key-agnostic
+(both catalogues are public).
+
 ### v2.1.0 - Repository Audit
 
 **Designed for model churn.** Both providers rotate models constantly, so the
