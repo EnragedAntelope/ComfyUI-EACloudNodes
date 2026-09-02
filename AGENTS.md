@@ -6,9 +6,10 @@ legacy `NODE_CLASS_MAPPINGS`.
 
 ## Current state
 
-_Last verified: 2026-09-01_
+_Last verified: 2026-09-02_
 
-- **Status**: v2.2.1 on `main` — zero-dependency packaging: pillow/requests
+- **Status**: v2.2.2 on `main`, pushed to trigger the registry publish workflow
+  (paths-gated to `pyproject.toml`). Zero-dependency packaging: pillow/requests
   dropped from both manifests (ComfyUI's own requirements ship both, so the
   pack declares no dependencies of its own; the guard test now covers both
   manifests). Publish-workflow Node 20 warning investigated: originates inside

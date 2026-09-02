@@ -1,5 +1,36 @@
 ## Version History
 
+### v2.2.2 - Validation errors surfaced to the UI, not just the console
+
+A user reported that a Groq node run with no API key set (default widgets,
+nothing else changed) produced a wall of duplicate `[ERROR] Custom validation
+failed for node: <widget> - Groq API key is required...` lines in the console
+— one per widget on the node — and the actual message never appeared in the
+node's own status/help output where the UI shows it.
+
+Root cause: ComfyUI's v3 validation step calls `validate_inputs()` once, and
+when it returns an error string, the frontend's fan-out logic attaches that
+same string to every input on the node (hence one line per widget) and
+refuses to queue the node at all, so `execute()` never runs and the node's
+own status output — the one place a user actually looks — stays blank.
+
+Fix: removed `validate_inputs()` from `GroqNode` and `OpenrouterNode`
+entirely. The checks it used to make — API key required, manual model
+required when "Manual Input" is selected, `additional_params` must parse as a
+JSON object, audio-model rejection (Groq), and endpoint policy (OpenRouter)
+— now run at the top of `execute()` and return through the node's `status`
+output via `io.NodeOutput`, the same as every other error path in these
+nodes already did. The node now always validates and queues; a bad input
+produces one clear message in the status output instead of a validation
+rejection. Verified live against a v3-registered instance: the reproduction
+workflow (empty API key, all three outputs wired to a display node) now
+executes in ~0.02s with a clean console and the expected message in the
+status output, for both chat nodes.
+
+`OpenRouterModels` was checked too — its `validate_inputs` unconditionally
+returns `True` (the models endpoint needs no key), so it was never capable of
+this failure mode and was left as-is.
+
 ### v2.2.1 - Zero-dependency packaging
 
 ComfyUI's own requirements.txt has shipped both Pillow and requests for years,

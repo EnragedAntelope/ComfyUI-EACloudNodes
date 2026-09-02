@@ -1,7 +1,7 @@
 [project]
 name = "eacloudnodes"
 description = "ComfyUI v3 nodes for cloud LLM services: Groq Chat, OpenRouter Chat, and an OpenRouter model browser. Live model lists, vision support, JSON output, seed control, and automatic retries."
-version = "2.2.1"
+version = "2.2.2"
 license = {file = "LICENSE"}
 dependencies = []
 

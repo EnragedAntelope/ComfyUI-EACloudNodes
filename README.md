@@ -306,7 +306,20 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 
 ## Version History
 
-### v2.2.1 (Current)
+### v2.2.2 (Current)
+
+- **Fixed: missing API key errors never reached the UI**
+  - `validate_inputs()` on the Groq and OpenRouter chat nodes has been removed.
+    ComfyUI's v3 validation fan-out repeated its returned error string across
+    every widget input (a wall of duplicate console errors) and blocked
+    `execute()` outright, so the message never reached the node's own
+    `status`/help output — a user with no API key set saw console noise
+    instead of "API key is required" in the UI
+  - The same checks (API key required, manual model required, endpoint
+    policy, `additional_params` JSON shape) now run inside `execute()` and
+    surface through the node's status output where the UI actually shows them
+
+### v2.2.1
 
 - **Zero-dependency packaging**: removed `pillow` and `requests` from
   `requirements.txt` and `pyproject.toml`. ComfyUI itself requires both, so every
