@@ -215,8 +215,12 @@ def test_category_separator_is_rejected(groq_call):
     assert groq_call.calls["calls"] == []
 
 
-def test_audio_model_is_rejected(groq_call):
-    out = groq_call(model="Manual Input", manual_model="whisper-large-v3")
+@pytest.mark.parametrize("manual_model", [
+    "whisper-large-v3",
+    "canopylabs/orpheus-v1-english",
+])
+def test_audio_model_is_rejected(groq_call, manual_model):
+    out = groq_call(model="Manual Input", manual_model=manual_model)
     assert "audio endpoints" in out.args[1]
     assert groq_call.calls["calls"] == []
 
@@ -231,35 +235,18 @@ def test_empty_user_prompt_is_rejected(groq_call):
     assert "User prompt is required" in out.args[1]
     assert groq_call.calls["calls"] == []
 
-
-@pytest.mark.parametrize("model,manual,expected", [
-    ("--- Featured ---", "", "category label"),
-    ("Manual Input", "", "Manual model identifier is required"),
-    ("Manual Input", "whisper-large-v3", "audio endpoints"),
-    ("Manual Input", "canopylabs/orpheus-v1-english", "audio endpoints"),
-])
-def test_validate_inputs_rejects_bad_models(model, manual, expected):
-    result = GroqNode.validate_inputs(
-        api_key="k", model=model, manual_model=manual, user_prompt="hi")
-    assert isinstance(result, str) and expected in result
+def test_missing_api_key_is_reported(groq_call):
+    out = groq_call(api_key="")
+    assert out.args[0] == ""
+    assert "API key is required" in out.args[1]
+    assert groq_call.calls["calls"] == []
 
 
-def test_validate_inputs_accepts_a_valid_selection():
-    assert GroqNode.validate_inputs(
-        api_key="k", model="openai/gpt-oss-120b", manual_model="", user_prompt="hi") is True
-
-
-def test_validate_inputs_requires_an_api_key():
-    result = GroqNode.validate_inputs(
-        api_key="", model="openai/gpt-oss-120b", manual_model="", user_prompt="hi")
-    assert "API key is required" in result
-
-
-def test_validate_inputs_rejects_non_object_additional_params():
-    result = GroqNode.validate_inputs(
-        api_key="k", model="openai/gpt-oss-120b", manual_model="",
-        user_prompt="hi", additional_params="[1,2]")
-    assert "must be a JSON object" in result
+def test_manual_model_required_when_selected(groq_call):
+    out = groq_call(model="Manual Input", manual_model="")
+    assert out.args[0] == ""
+    assert "Manual model identifier is required" in out.args[1]
+    assert groq_call.calls["calls"] == []
 
 
 # --------------------------------------------------------------------------

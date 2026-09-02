@@ -6,7 +6,7 @@ legacy `NODE_CLASS_MAPPINGS`.
 
 ## Current state
 
-_Last verified: 2026-08-24_
+_Last verified: 2026-09-01_
 
 - **Status**: v2.2.1 on `main` — zero-dependency packaging: pillow/requests
   dropped from both manifests (ComfyUI's own requirements ship both, so the
@@ -16,7 +16,9 @@ _Last verified: 2026-08-24_
   upstream main has not moved since 2025-05-10, so there is nothing newer to
   pin — documented in PROJECT_NOTES.md. Prior state: external audit remediated
   and reviewed (relative sibling imports, endpoint policy enforced at
-  execution, suite loads the pack ComfyUI's way).
+  execution, suite loads the pack ComfyUI's way). `validate_inputs` removed
+  from both chat nodes; api_key and manual_model checks now run in `execute()`
+  and surface via the node `status` output.
 - **Works**: all three nodes; offline pytest suite (no network or API keys needed — `python -m pytest tests` reports the count); vision via tensor→PIL in `chat_common.py` (no torchvision).
 - **In progress**: nothing.
 - **Known gaps**: seed counters are keyed by `(model, seed_value)` — two nodes sharing both advance one counter, because the v3 execute API exposes no per-instance id. Accepted.
@@ -41,13 +43,15 @@ python -m pytest tests                            # rootdir pinned to tests/ by 
   ComfyUI's own requirements.txt ships all four. `tests/test_package.py` enforces this.
 - Shared chat-node plumbing lives in `chat_common.py`; do not re-duplicate image
   encoding, seeds, or the retry loop into the node modules.
-- OpenRouter `base_url`: https-only except localhost hosts, enforced in **both**
-  `validate_inputs` and `execute` — a widget converted to an input socket has no
-  value at validation time, and `execute` is where the key goes on the wire.
-  Non-`openrouter.ai` endpoints must keep their visible status warning, and that
-  warning must not claim the key "was sent" on a path that sent nothing. Don't
-  weaken this without a replacement mitigation — workflows are shared JSON and
-  carry the user's key.
+- OpenRouter `base_url`: https-only except localhost hosts, enforced in `execute()`
+  only. `validate_inputs` was removed from both chat nodes because ComfyUI's v3
+  validation fan-out repeats one returned string across every input and blocks
+  `execute()`, so the error never reached the node's `status` output. A widget
+  converted to an input socket has no value at validation time, and `execute`
+  is where the key goes on the wire. Non-`openrouter.ai` endpoints must keep
+  their visible status warning, and that warning must not claim the key "was
+  sent" on a path that sent nothing. Don't weaken this without a replacement
+  mitigation — workflows are shared JSON and carry the user's key.
 - Retries go through `chat_common.post_with_retries` and must keep checking
   interrupts (`check_interrupted`) — never swallow `InterruptProcessingException`.
 - Every schema input needs a tooltip; README ↔ pyproject version/description stay

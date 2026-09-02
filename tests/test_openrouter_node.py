@@ -214,27 +214,29 @@ def test_seed_counter_dict_is_bounded(openrouter_call):
 # Validation and HTTP handling
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize("kwargs,expected", [
-    ({"api_key": ""}, "API key is required"),
-    ({"model": "Manual Input", "manual_model": ""}, "Manual model identifier is required"),
-    ({"base_url": ""}, "endpoint URL is required"),
-    ({"base_url": "ftp://example.com"}, "Invalid API endpoint URL"),
-    ({"additional_params": "[1]"}, "must be a JSON object"),
-    ({"additional_params": "{oops"}, "Invalid JSON"),
-])
-def test_validate_inputs_rejections(kwargs, expected):
-    args = dict(api_key="k", model="Manual Input", manual_model="a/b",
-                user_prompt="hi", base_url="https://openrouter.ai/api/v1/chat/completions")
-    args.update(kwargs)
-    result = OpenrouterNode.validate_inputs(**args)
-    assert isinstance(result, str) and expected in result
+def test_missing_api_key_is_reported(openrouter_call):
+    out = openrouter_call(api_key="")
+    assert out.args[0] == ""
+    assert "OpenRouter API key is required" in out.args[1]
+    assert openrouter_call.calls["calls"] == []
 
 
-def test_validate_inputs_accepts_a_valid_config():
-    assert OpenrouterNode.validate_inputs(
-        api_key="k", model="Manual Input", manual_model="a/b", user_prompt="hi",
-        base_url="https://openrouter.ai/api/v1/chat/completions") is True
+def test_manual_model_required_when_selected(openrouter_call):
+    out = openrouter_call(model="Manual Input", manual_model="")
+    assert "Manual model identifier is required" in out.args[1]
+    assert openrouter_call.calls["calls"] == []
 
+
+def test_empty_base_url_is_rejected(openrouter_call):
+    out = openrouter_call(base_url="")
+    assert "endpoint URL is required" in out.args[1]
+    assert openrouter_call.calls["calls"] == []
+
+
+def test_additional_params_rejects_invalid_json(openrouter_call):
+    out = openrouter_call(additional_params="{oops")
+    assert "Invalid JSON" in out.args[1]
+    assert openrouter_call.calls["calls"] == []
 
 def test_payload_too_large_is_reported(openrouter_call):
     out = openrouter_call(responses=[FakeResponse(413, {})])
@@ -274,20 +276,6 @@ def test_help_output_is_not_duplicated(openrouter_call):
 # v2.2.0: endpoint policy, image format, redaction, Retry-After
 # --------------------------------------------------------------------------
 
-
-def test_plain_http_to_a_remote_host_is_rejected():
-    """The Authorization header must never cross the wire in cleartext."""
-    result = OpenrouterNode.validate_inputs(
-        api_key="k", model="Manual Input", manual_model="a/b", user_prompt="hi",
-        base_url="http://evil.example.com/v1")
-    assert isinstance(result, str) and "plain http://" in result
-
-
-def test_plain_http_to_localhost_is_allowed():
-    """A local proxy is the one legitimate plain-http case."""
-    assert OpenrouterNode.validate_inputs(
-        api_key="k", model="Manual Input", manual_model="a/b", user_prompt="hi",
-        base_url="http://127.0.0.1:8080/v1") is True
 
 
 def test_custom_endpoint_warns_in_the_status(catalogue, openrouter_call):

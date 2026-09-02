@@ -473,41 +473,6 @@ class GroqNode(io.ComfyNode):
         )
 
     @classmethod
-    def validate_inputs(cls, api_key, model, manual_model, user_prompt, **kwargs):
-        """Validate inputs before execution"""
-        # Validate API key
-        if not api_key or not api_key.strip():
-            return "Groq API key is required. Get one at https://console.groq.com/keys"
-
-        # Validate model selection
-        if model == "Manual Input" and (not manual_model or not manual_model.strip()):
-            return "Manual model identifier is required when 'Manual Input' is selected"
-
-        # Category headers are group labels, not selectable models
-        if _is_category_separator(model):
-            return f"'{model}' is a category label, not a model. Please select a model from the dropdown."
-
-        # Audio models are served by different Groq endpoints and cannot be used here
-        actual_model = manual_model if model == "Manual Input" else model
-        if actual_model and _is_audio_model(actual_model):
-            return (
-                f"'{actual_model}' is a speech model served by Groq's audio endpoints "
-                "and cannot be used for chat completions. Please select a chat model."
-            )
-
-        # Validate additional_params if provided
-        additional_params = kwargs.get("additional_params", "")
-        if additional_params and additional_params.strip():
-            try:
-                parsed = json.loads(additional_params)
-            except json.JSONDecodeError:
-                return "Invalid JSON in additional parameters. Example format: {\"stop\": [\"\\n\"]}"
-            if not isinstance(parsed, dict):
-                return "Additional parameters must be a JSON object. Example format: {\"stop\": [\"\\n\"]}"
-
-        return True
-
-    @classmethod
     def fingerprint_inputs(cls, **kwargs):
         """
         Equivalent of V1's IS_CHANGED.
@@ -605,6 +570,12 @@ For full documentation and examples, visit:
 https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
 
         try:
+            if not api_key or not api_key.strip():
+                return io.NodeOutput("", "Groq API key is required. Get one at https://console.groq.com/keys", help_text)
+
+            if model == "Manual Input" and (not manual_model or not manual_model.strip()):
+                return io.NodeOutput("", "Manual model identifier is required when 'Manual Input' is selected", help_text)
+
             # Sanitize and validate numeric inputs
             try:
                 temperature = max(0.0, min(2.0, float(temperature)))

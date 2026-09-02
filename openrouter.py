@@ -45,8 +45,7 @@ def _endpoint_error(base_url: str):
     """
     Reject an endpoint the API key must not be sent to; None means it is allowed.
 
-    Enforced in execute() as well as validate_inputs(), because validate_inputs
-    only sees a literal widget value - once base_url is converted to an input
+    Enforced in execute(), because once base_url is converted to an input
     socket its value is not known until the graph runs, and execute() is the
     point where the Authorization header actually goes on the wire.
     """
@@ -419,33 +418,6 @@ class OpenrouterNode(io.ComfyNode):
             is_output_node=True
         )
 
-    @classmethod
-    def validate_inputs(cls, api_key, model, manual_model, user_prompt, base_url, **kwargs):
-        """Validate inputs before execution"""
-        # Validate API key
-        if not api_key or not api_key.strip():
-            return "OpenRouter API key is required. Get one at https://openrouter.ai/keys"
-
-        # Validate model selection
-        if model == "Manual Input" and (not manual_model or not manual_model.strip()):
-            return "Manual model identifier is required when 'Manual Input' is selected"
-
-        # Validate base URL
-        endpoint_error = _endpoint_error(base_url)
-        if endpoint_error is not None:
-            return endpoint_error
-
-        # Validate additional_params if provided
-        additional_params = kwargs.get("additional_params", "")
-        if additional_params and additional_params.strip():
-            try:
-                parsed = json.loads(additional_params)
-            except json.JSONDecodeError:
-                return "Invalid JSON in additional parameters. Example format: {\"top_a\": 0.5}"
-            if not isinstance(parsed, dict):
-                return "Additional parameters must be a JSON object. Example format: {\"top_a\": 0.5}"
-
-        return True
 
     @classmethod
     def fingerprint_inputs(cls, **kwargs):
@@ -563,9 +535,18 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             return io.NodeOutput(response_text, status + warning, help_text)
 
         try:
-            # Re-checked here, not just in validate_inputs: once base_url is
-            # converted to an input socket its value is unknown until the graph
-            # runs, and this is where the Authorization header goes on the wire.
+            # These checks used to live in validate_inputs(); ComfyUI's v3 validation
+            # fan-out repeated the returned string across every input AND blocked
+            # execute(), so the error never reached the node's status output.
+            if not api_key or not api_key.strip():
+                return out("", "OpenRouter API key is required. Get one at https://openrouter.ai/keys")
+
+            if model == "Manual Input" and (not manual_model or not manual_model.strip()):
+                return out("", "Manual model identifier is required when 'Manual Input' is selected")
+
+            # Enforced here (validate_inputs was removed): once base_url
+            # is converted to an input socket its value is unknown until the graph runs,
+            # and this is where the Authorization header goes on the wire.
             endpoint_error = _endpoint_error(base_url)
             if endpoint_error is not None:
                 return out("", f"Error: {endpoint_error}")
