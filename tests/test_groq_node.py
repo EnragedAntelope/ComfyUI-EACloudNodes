@@ -538,3 +538,11 @@ def test_interrupt_is_not_swallowed(monkeypatch, groq_call):
 
     with pytest.raises(InterruptProcessingException):
         groq_call()
+
+
+def test_null_content_and_usage_yield_empty_string(groq_call):
+    """Reasoning-only replies carry content: null; outputs must stay strings."""
+    payload = {"model": "m", "usage": None, "choices": [{"message": {"content": None}}]}
+    out = groq_call(responses=[FakeResponse(200, payload)])
+    assert out.args[0] == ""
+    assert "0+0=0" in out.args[1]

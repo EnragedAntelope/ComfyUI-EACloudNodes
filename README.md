@@ -306,7 +306,14 @@ Enable `debug_mode` in the Groq node for detailed troubleshooting information.
 
 ## Version History
 
-### v2.2.2 (Current)
+### v2.2.3 (Current)
+
+- **Fixed: a reply with null content no longer breaks the response output**
+  - Reasoning-only or refused replies can carry `content: null` (and
+    `usage: null`); both chat nodes now return an empty string instead of
+    `None` or an "Unexpected Error".
+
+### v2.2.2
 
 - **Fixed: missing API key errors never reached the UI**
   - `validate_inputs()` on the Groq and OpenRouter chat nodes has been removed.
