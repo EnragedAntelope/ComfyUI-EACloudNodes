@@ -350,3 +350,11 @@ def test_custom_endpoint_warning_does_not_claim_an_unsent_key(openrouter_call):
     assert openrouter_call.calls["calls"] == []
     assert "were sent to" not in out.args[1]
     assert "proxy.example.com" in out.args[1]     # still flags the endpoint
+
+
+def test_null_content_and_usage_yield_empty_string(openrouter_call):
+    """Reasoning-only replies carry content: null; outputs must stay strings."""
+    payload = {"model": "m", "usage": None, "choices": [{"message": {"content": None}}]}
+    out = openrouter_call(responses=[FakeResponse(200, payload)])
+    assert out.args[0] == ""
+    assert "0+0=0" in out.args[1]

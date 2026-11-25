@@ -721,7 +721,7 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
 
             # Extract information for status
             model_used = response_json.get("model", "unknown")
-            tokens = response_json.get("usage", {})
+            tokens = response_json.get("usage") or {}
             prompt_tokens = tokens.get("prompt_tokens", 0)
             completion_tokens = tokens.get("completion_tokens", 0)
             total_tokens = prompt_tokens + completion_tokens
@@ -729,7 +729,7 @@ https://github.com/EnragedAntelope/ComfyUI-EACloudNodes"""
             status_msg = f"Success: Model={model_used} | Seed={seed} | Tokens: {prompt_tokens}+{completion_tokens}={total_tokens}"
 
             if "choices" in response_json and len(response_json["choices"]) > 0:
-                content = response_json["choices"][0].get("message", {}).get("content", "")
+                content = (response_json["choices"][0].get("message") or {}).get("content") or ""
                 return out(content, status_msg)
             else:
                 return out("", "Error: No response content from the model")

@@ -1,5 +1,12 @@
 ## Version History
 
+### v2.2.3 - Null content guard
+
+- Chat nodes coerce `message.content: null` to `""` and treat `usage: null`
+  as empty. OpenRouter returns null content for reasoning-only and some
+  refusal replies; the old `.get("content", "")` only covered a missing key,
+  so `None` reached a STRING output. Regression tests in both node suites.
+
 ### v2.2.2 - Validation errors surfaced to the UI, not just the console
 
 A user reported that a Groq node run with no API key set (default widgets,

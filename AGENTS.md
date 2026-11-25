@@ -6,9 +6,10 @@ legacy `NODE_CLASS_MAPPINGS`.
 
 ## Current state
 
-_Last verified: 2026-09-02_
+_Last verified: 2026-11-25_
 
-- **Status**: v2.2.2 on `main`, pushed to trigger the registry publish workflow
+- **Status**: v2.2.3 on `main` (null `content`/`usage` in a chat reply now
+  yields an empty string). v2.2.2 was pushed to trigger the registry publish workflow
   (paths-gated to `pyproject.toml`). Zero-dependency packaging: pillow/requests
   dropped from both manifests (ComfyUI's own requirements ship both, so the
   pack declares no dependencies of its own; the guard test now covers both
